@@ -16,6 +16,7 @@ from collections.abc import Generator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, AsyncIterator, Dict, List, cast, override
 
+import cast_access
 import diskcache
 import http_cache
 import jackett
@@ -1447,8 +1448,7 @@ def kodi_repo(request: Request, path: str = "") -> Response:
     )
 
 
-@app.get("/play/{magnet_hash}/{filename:path}")
-def play(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Response:
+def _serve_output_file(magnet_hash: str, filename: str) -> Response:
     # Anchored on OUTPUT_DIR itself - anchoring on OUTPUT_DIR/<magnet_hash>
     # lets a traversing magnet_hash move the root of the containment check.
     filepath = _resolve_within(settings.OUTPUT_DIR, os.path.join(magnet_hash, filename))
@@ -1457,6 +1457,28 @@ def play(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Respo
     response = FileResponse(filepath)
     response.headers["Access-Control-Allow-Origin"] = "*"
     return response
+
+
+@app.get("/play/{magnet_hash}/{filename:path}")
+def play(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Response:
+    return _serve_output_file(magnet_hash, filename)
+
+
+class CastLinkResponse(BaseModel):
+    prefix: str
+
+
+@app.get("/api/cast_link/{magnet_hash}", response_model=CastLinkResponse)
+def cast_link(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, str]:
+    """Path prefix a Chromecast can use for this torrent's files without logging in."""
+    return {"prefix": f"/cast/{cast_access.make_token(magnet_hash)}/{magnet_hash}/"}
+
+
+@app.get("/cast/{token}/{magnet_hash}/{filename:path}")
+def cast_play(token: str, magnet_hash: str, filename: str) -> Response:
+    if not cast_access.verify_token(token, magnet_hash):
+        raise HTTPException(status_code=404)
+    return _serve_output_file(magnet_hash, filename)
 
 
 # Catch-all route for frontend - MUST be defined last
