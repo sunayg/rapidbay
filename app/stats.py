@@ -5,7 +5,7 @@ import os
 import sqlite3
 import threading
 import time
-from typing import Any
+from typing import Any, cast
 
 import settings
 
@@ -86,20 +86,24 @@ def _import_library(connection: sqlite3.Connection) -> None:
             data = json.load(handle)
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return
-    titles = data.get("titles") if isinstance(data, dict) else None
-    if not isinstance(titles, dict):
+    raw_titles = cast("dict[str, Any]", data).get("titles") if isinstance(data, dict) else None
+    if not isinstance(raw_titles, dict):
         return
-    for item in titles.values():
-        if not isinstance(item, dict) or not isinstance(item.get("tmdb_id"), int):
+    titles = cast("dict[str, Any]", raw_titles)
+    for raw_item in titles.values():
+        if not isinstance(raw_item, dict):
             continue
-        for download in item.get("downloads") or []:
+        item = cast("dict[str, Any]", raw_item)
+        if not isinstance(item.get("tmdb_id"), int):
+            continue
+        for download in cast("list[Any]", item.get("downloads") or []):
             if not isinstance(download, dict):
                 continue
-            digest = download.get("hash") or ""
+            digest = cast("dict[str, Any]", download).get("hash") or ""
             record(
                 "download",
                 item,
-                int(download.get("at") or 0),
+                int(cast("dict[str, Any]", download).get("at") or 0),
                 f"download:{item['media_type']}:{item['tmdb_id']}:{digest}",
                 connection=connection,
             )
@@ -111,9 +115,10 @@ def _import_library(connection: sqlite3.Connection) -> None:
                 f"watched:{item['media_type']}:{item['tmdb_id']}",
                 connection=connection,
             )
-        for episode in item.get("watched_episodes") or []:
-            if not isinstance(episode, dict):
+        for watched in cast("list[Any]", item.get("watched_episodes") or []):
+            if not isinstance(watched, dict):
                 continue
+            episode = cast("dict[str, Any]", watched)
             record(
                 "watched",
                 item,
@@ -207,7 +212,7 @@ def top(media_type: str, limit: int = 10) -> list[dict[str, Any]]:
             """,
             (_trending_since_ms(), media_type, limit),
         ).fetchall()
-    cards = []
+    cards: list[dict[str, Any]] = []
     for rank, row in enumerate(rows, start=1):
         cards.append({
             "tmdb_id": row["tmdb_id"],
