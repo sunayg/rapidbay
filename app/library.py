@@ -18,7 +18,10 @@ from result_grouping import (
     enrich_search_results,
 )
 from title_parser import parse_title
-from tmdb import TMDBClient
+from tmdb import TMDBClient, failure_count
+
+# A title TMDB confirmed it cannot match is looked up again after this long.
+_UNMATCHED_RETRY_MS = 24 * 60 * 60 * 1000
 
 _queue: queue.Queue[dict[str, Any]] = queue.Queue()
 _start_lock = threading.Lock()
@@ -223,14 +226,20 @@ def _remember_identity(raw_title: str, identity_parsed: dict[str, Any]) -> dict[
     data = _load()
     identities: dict[str, Any] = data["identities"]
     cached = identities.get(key)
+    now = int(time.time() * 1000)
     if isinstance(cached, dict) and cached.get("unmatched"):
-        return None
-    if isinstance(cached, dict) and cached.get("tmdb_id"):
+        # Markers saved before "at" existed have no time and are retried once.
+        if now - int(cached.get("at") or 0) < _UNMATCHED_RETRY_MS:
+            return None
+    elif isinstance(cached, dict) and cached.get("tmdb_id"):
         return cached
+    failures_before = failure_count()
     resolved = _resolve_identity(raw_title)
     if resolved is None:
-        if settings.TMDB_API_KEY:
-            identities[key] = {"unmatched": True}
+        # Only a TMDB answer of "no match" is remembered. A timeout or error is
+        # tried again on the next event.
+        if settings.TMDB_API_KEY and failure_count() == failures_before:
+            identities[key] = {"unmatched": True, "at": now}
             _save(data)
         return None
     identities[key] = resolved

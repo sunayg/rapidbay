@@ -947,3 +947,29 @@ def test_details_fill_runtime_on_the_card_already_shown() -> None:
 
     assert assembler.snapshot()["groups"][0]["runtime"] == 155
     client.search_multi.assert_called_once()
+
+
+def test_enrichment_stops_starting_lookups_once_the_time_budget_is_spent() -> None:
+    results = [make_torrent("Dune|||2021"), make_torrent("Heat|||1995")]
+    with patch("app.result_grouping.parse_title", side_effect=lambda title: parsed_title(title)), \
+            patch("app.result_grouping._tmdb_client") as make_client, \
+            patch("app.result_grouping.ENRICH_BUDGET_SECONDS", 0), \
+            patch("app.result_grouping.resolve_title") as resolve:
+        response = enrich_search_results(results, "key")
+
+    resolve.assert_not_called()
+    assert make_client.called
+    assert response["groups"] == []
+    assert [item["parsed_title"] for item in response["other"]] == ["Dune", "Heat"]
+
+
+def test_enrichment_stops_when_tmdb_is_unavailable() -> None:
+    results = [make_torrent("Dune|||2021"), make_torrent("Heat|||1995")]
+    with patch("app.result_grouping.parse_title", side_effect=lambda title: parsed_title(title)), \
+            patch("app.result_grouping._tmdb_client"), \
+            patch("app.result_grouping.is_unavailable", return_value=True), \
+            patch("app.result_grouping.resolve_title") as resolve:
+        response = enrich_search_results(results, "key")
+
+    resolve.assert_not_called()
+    assert len(response["other"]) == 2

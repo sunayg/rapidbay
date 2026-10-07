@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, call, patch
 
 import requests
 
-from app.tmdb import TMDBClient
+from app.tmdb import REQUEST_TIMEOUT, TMDBClient
 
 
 def make_response(status_code: int = 200, payload: object = None) -> MagicMock:
@@ -25,7 +25,7 @@ def test_search_multi_returns_json_dict_on_success() -> None:
     get.assert_called_once_with(
         "https://api.themoviedb.org/3/search/multi",
         params={"api_key": "test", "query": "Breaking Bad"},
-        timeout=30,
+        timeout=REQUEST_TIMEOUT,
     )
 
 
@@ -39,7 +39,7 @@ def test_search_multi_sends_v4_read_token_as_bearer() -> None:
     get.assert_called_once_with(
         "https://api.themoviedb.org/3/search/multi",
         params={"query": "Dune"},
-        timeout=30,
+        timeout=REQUEST_TIMEOUT,
         headers={"Authorization": "Bearer header.payload.signature"},
     )
 
@@ -51,7 +51,7 @@ def test_get_tv_details_returns_json_dict_on_success() -> None:
 
     assert result == payload
     get.assert_called_once_with(
-        "https://api.themoviedb.org/3/tv/1396", params={"api_key": "test"}, timeout=30
+        "https://api.themoviedb.org/3/tv/1396", params={"api_key": "test"}, timeout=REQUEST_TIMEOUT
     )
 
 
@@ -62,7 +62,7 @@ def test_get_tv_season_requests_the_season_endpoint() -> None:
 
     assert result == payload
     get.assert_called_once_with(
-        "https://api.themoviedb.org/3/tv/1396/season/1", params={"api_key": "test"}, timeout=30
+        "https://api.themoviedb.org/3/tv/1396/season/1", params={"api_key": "test"}, timeout=REQUEST_TIMEOUT
     )
 
 
@@ -73,7 +73,7 @@ def test_get_movie_details_returns_json_dict_on_success() -> None:
 
     assert result == payload
     get.assert_called_once_with(
-        "https://api.themoviedb.org/3/movie/603", params={"api_key": "test"}, timeout=30
+        "https://api.themoviedb.org/3/movie/603", params={"api_key": "test"}, timeout=REQUEST_TIMEOUT
     )
 
 
@@ -132,7 +132,7 @@ def test_search_multi_encodes_special_query_as_param() -> None:
     get.assert_called_once_with(
         "https://api.themoviedb.org/3/search/multi",
         params={"api_key": "test", "query": query},
-        timeout=30,
+        timeout=REQUEST_TIMEOUT,
     )
 
 
@@ -190,7 +190,7 @@ def test_search_multi_with_empty_query() -> None:
     get.assert_called_once_with(
         "https://api.themoviedb.org/3/search/multi",
         params={"api_key": "test", "query": ""},
-        timeout=30,
+        timeout=REQUEST_TIMEOUT,
     )
 
 
@@ -200,7 +200,7 @@ def test_get_tv_details_with_zero_id() -> None:
 
     assert result == {"id": 0}
     get.assert_called_once_with(
-        "https://api.themoviedb.org/3/tv/0", params={"api_key": "test"}, timeout=30
+        "https://api.themoviedb.org/3/tv/0", params={"api_key": "test"}, timeout=REQUEST_TIMEOUT
     )
 
 
@@ -210,7 +210,7 @@ def test_get_movie_details_with_zero_id() -> None:
 
     assert result == {"id": 0}
     get.assert_called_once_with(
-        "https://api.themoviedb.org/3/movie/0", params={"api_key": "test"}, timeout=30
+        "https://api.themoviedb.org/3/movie/0", params={"api_key": "test"}, timeout=REQUEST_TIMEOUT
     )
 
 
@@ -228,12 +228,12 @@ def test_multiple_searches_use_same_client() -> None:
         call(
             "https://api.themoviedb.org/3/search/multi",
             params={"api_key": "test", "query": "first"},
-            timeout=30,
+            timeout=REQUEST_TIMEOUT,
         ),
         call(
             "https://api.themoviedb.org/3/search/multi",
             params={"api_key": "test", "query": "second"},
-            timeout=30,
+            timeout=REQUEST_TIMEOUT,
         ),
     ]
 
@@ -249,11 +249,65 @@ def test_two_clients_keep_different_keys_independent() -> None:
         call(
             "https://api.themoviedb.org/3/search/multi",
             params={"api_key": "first-key", "query": "first"},
-            timeout=30,
+            timeout=REQUEST_TIMEOUT,
         ),
         call(
             "https://api.themoviedb.org/3/search/multi",
             params={"api_key": "second-key", "query": "second"},
-            timeout=30,
+            timeout=REQUEST_TIMEOUT,
         ),
     ]
+
+
+def test_outage_opens_the_breaker_and_later_calls_skip_the_network() -> None:
+    from app import tmdb
+
+    tmdb.reset_health()
+    with patch("app.tmdb.requests.get", side_effect=requests.Timeout) as get:
+        client = TMDBClient(api_key="test")
+        for _ in range(3):
+            assert client.search_multi("Dune") is None
+        assert tmdb.is_unavailable()
+        assert client.search_multi("Dune") is None
+
+    assert get.call_count == 3
+    assert tmdb.failure_count() == 4
+    tmdb.reset_health()
+
+
+def test_breaker_closes_after_the_cooldown() -> None:
+    from app import tmdb
+
+    tmdb.reset_health()
+    with patch("app.tmdb.requests.get", side_effect=requests.Timeout):
+        for _ in range(3):
+            TMDBClient(api_key="test").search_multi("Dune")
+    assert tmdb.is_unavailable()
+
+    with patch("app.tmdb.time.monotonic", return_value=10**9):
+        assert not tmdb.is_unavailable()
+        with patch("app.tmdb.requests.get", return_value=make_response(payload={"results": []})):
+            assert TMDBClient(api_key="test").search_multi("Dune") == {"results": []}
+    tmdb.reset_health()
+
+
+def test_not_found_is_an_answer_and_does_not_count_as_a_failure() -> None:
+    from app import tmdb
+
+    tmdb.reset_health()
+    with patch("app.tmdb.requests.get", return_value=make_response(status_code=404)):
+        assert TMDBClient(api_key="test").get_tv_details(1) is None
+
+    assert tmdb.failure_count() == 0
+    tmdb.reset_health()
+
+
+def test_server_error_counts_as_a_failure() -> None:
+    from app import tmdb
+
+    tmdb.reset_health()
+    with patch("app.tmdb.requests.get", return_value=make_response(status_code=503)):
+        assert TMDBClient(api_key="test").get_tv_details(1) is None
+
+    assert tmdb.failure_count() == 1
+    tmdb.reset_health()

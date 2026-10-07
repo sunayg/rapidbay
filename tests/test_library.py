@@ -147,6 +147,8 @@ def test_unmatched_title_is_not_added_to_the_catalog() -> None:
     with tempfile.TemporaryDirectory() as tmp, \
             patch("app.library.settings.LIBRARY_PATH", os.path.join(tmp, "library.json")), \
             patch("app.library.settings.TMDB_API_KEY", "key"), \
+            patch("app.library.failure_count", return_value=0), \
+            patch("app.library._resolve_identity_direct", return_value=None), \
             patch("app.library.enrich_search_results", side_effect=_show) as enrich:
         process_event({
             "event": "download",
@@ -339,3 +341,71 @@ def test_finish_removes_an_earlier_unfinished_play_but_keeps_a_later_rewatch() -
         assert [card["title"] for card in shown["keep_watching"]] == ["Slow Horses"]
         assert shown["keep_watching"][0]["minutes_left"] == 40
         assert shown["recent"][0]["subtitle"] == "Season 6 - Episode 2"
+
+
+def _no_match(_results, _key):
+    return {"groups": [], "other": []}
+
+
+def _download(ts: int) -> dict:
+    return {
+        "event": "download",
+        "magnet": "magnet:?xt=urn:btih:fff",
+        "title": "Totally Unknown Audiobook",
+        "ts": ts,
+    }
+
+
+def test_tmdb_failure_does_not_leave_an_unmatched_marker() -> None:
+    failures = iter([0, 1, 1, 1])
+    with tempfile.TemporaryDirectory() as tmp, \
+            patch("app.library.settings.LIBRARY_PATH", os.path.join(tmp, "library.json")), \
+            patch("app.library.settings.TMDB_API_KEY", "key"), \
+            patch("app.library.failure_count", side_effect=lambda: next(failures)), \
+            patch("app.library.enrich_search_results", side_effect=_no_match) as enrich, \
+            patch("app.library._resolve_identity_direct", return_value=None):
+        process_event(_download(1))
+        assert not os.path.exists(os.path.join(tmp, "library.json"))
+        # TMDB is back: the same title is looked up again, not skipped.
+        with patch("app.library.failure_count", return_value=0):
+            process_event(_download(2))
+        assert enrich.call_count == 2
+
+
+def test_confirmed_no_match_is_remembered_with_a_time_and_retried_after_a_day() -> None:
+    with tempfile.TemporaryDirectory() as tmp, \
+            patch("app.library.settings.LIBRARY_PATH", os.path.join(tmp, "library.json")), \
+            patch("app.library.settings.TMDB_API_KEY", "key"), \
+            patch("app.library.failure_count", return_value=0), \
+            patch("app.library.enrich_search_results", side_effect=_no_match) as enrich, \
+            patch("app.library._resolve_identity_direct", return_value=None):
+        process_event(_download(1))
+        process_event(_download(2))
+        assert enrich.call_count == 1
+        with open(os.path.join(tmp, "library.json"), encoding="utf-8") as handle:
+            marker = next(iter(json.load(handle)["identities"].values()))
+        assert marker["unmatched"] is True
+        assert marker["at"] > 0
+
+        with patch("app.library.time.time", return_value=time.time() + 25 * 60 * 60):
+            process_event(_download(3))
+        assert enrich.call_count == 2
+
+
+def test_unmatched_marker_without_a_time_is_retried() -> None:
+    with tempfile.TemporaryDirectory() as tmp, \
+            patch("app.library.settings.LIBRARY_PATH", os.path.join(tmp, "library.json")), \
+            patch("app.library.settings.TMDB_API_KEY", "key"), \
+            patch("app.library.failure_count", return_value=0), \
+            patch("app.library.enrich_search_results", side_effect=_no_match) as enrich, \
+            patch("app.library._resolve_identity_direct", return_value=None):
+        process_event(_download(1))
+        path = os.path.join(tmp, "library.json")
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        for key in data["identities"]:
+            data["identities"][key] = {"unmatched": True}
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(data, handle)
+        process_event(_download(2))
+        assert enrich.call_count == 2

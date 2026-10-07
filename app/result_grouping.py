@@ -1,15 +1,19 @@
 """Enrich flat torrent search results with TMDB metadata and buckets."""
 
 import re
+import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
 from title_parser import parse_title
-from tmdb import TMDBClient, tmdb_disk_cache
+from tmdb import TMDBClient, is_unavailable, tmdb_disk_cache
 
 MAX_TMDB_LOOKUPS: int = 30
 FIRST_RENDER_LOOKUPS: int = 3
+# The blocking search stops starting new TMDB lookups after this long. Titles it
+# did not reach are listed under Other.
+ENRICH_BUDGET_SECONDS: float = 20.0
 # A next episode dated today is treated as aired once this many releases exist for it.
 NEXT_EPISODE_RESULT_THRESHOLD: int = 3
 
@@ -825,7 +829,8 @@ def enrich_search_results(
     """Return TMDB groups and unmatched results from a flat torrent list.
 
     Searches are deduplicated by the parsed, cleaned title and capped at
-    ``MAX_TMDB_LOOKUPS``. The largest title groups are looked up first. Movie
+    ``MAX_TMDB_LOOKUPS``. The largest title groups are looked up first, until
+    ``ENRICH_BUDGET_SECONDS`` passes or TMDB stops answering. Movie
     releases join the card for the year in the filename. The returned season
     structure is JSON-serializable and follows the API shape
     ``[{"season": n, "episodes": [...]}]``.
@@ -839,7 +844,10 @@ def enrich_search_results(
     assembler = SearchAssembler(prepared)
     if tmdb_api_key:
         client = _tmdb_client(tmdb_api_key)
+        deadline = time.monotonic() + ENRICH_BUDGET_SECONDS
         for lookup in prepared.lookups[:MAX_TMDB_LOOKUPS]:
+            if time.monotonic() >= deadline or is_unavailable():
+                break
             groups, _search_response = resolve_title(client, lookup, fetch_details=True)
             assembler.apply(lookup.normalized, groups)
     return assembler.snapshot(final=True)
