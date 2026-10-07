@@ -773,8 +773,11 @@ def tv_lookup(q: str = "", _: None = Depends(authorize)) -> Dict[str, Any]:
         return {"tmdb_id": None, "title": None}
     folded = query.casefold()
     chosen: Dict[str, Any] | None = None
-    for candidate in results:
-        if not isinstance(candidate, dict) or candidate.get("media_type") != "tv":
+    for raw_candidate in cast("list[Any]", results):
+        if not isinstance(raw_candidate, dict):
+            continue
+        candidate = cast("Dict[str, Any]", raw_candidate)
+        if candidate.get("media_type") != "tv":
             continue
         name = candidate.get("name") or candidate.get("original_name") or ""
         if isinstance(name, str) and name.casefold() == folded:
@@ -782,7 +785,7 @@ def tv_lookup(q: str = "", _: None = Depends(authorize)) -> Dict[str, Any]:
             break
         if chosen is None:
             chosen = candidate
-    if not isinstance(chosen, dict) or not isinstance(chosen.get("id"), int):
+    if chosen is None or not isinstance(chosen.get("id"), int):
         return {"tmdb_id": None, "title": None}
     name = chosen.get("name") or chosen.get("original_name") or query
     return {"tmdb_id": chosen["id"], "title": name if isinstance(name, str) else query}
