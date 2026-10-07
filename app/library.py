@@ -8,7 +8,7 @@ import tempfile
 import threading
 import time
 from datetime import date
-from typing import Any
+from typing import Any, cast
 
 import log
 import settings
@@ -39,6 +39,22 @@ _start_lock = threading.Lock()
 _started = False
 
 
+def _text(value: Any) -> str:
+    """The value when it is a string, otherwise an empty string."""
+    return value if isinstance(value, str) else ""
+
+
+def _as_dict(value: Any) -> dict[str, Any] | None:
+    return cast("dict[str, Any]", value) if isinstance(value, dict) else None
+
+
+def _dict_items(value: Any) -> list[dict[str, Any]]:
+    """The dict entries of a stored list. Anything else in it is skipped."""
+    if not isinstance(value, list):
+        return []
+    return [cast("dict[str, Any]", entry) for entry in cast("list[Any]", value) if isinstance(entry, dict)]
+
+
 def _empty() -> dict[str, Any]:
     return {"identities": {}, "titles": {}}
 
@@ -57,11 +73,12 @@ def _load() -> dict[str, Any]:
             data = json.load(handle)
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return _empty()
-    if not isinstance(data, dict):
+    loaded = _as_dict(data)
+    if loaded is None:
         return _empty()
-    data.setdefault("identities", {})
-    data.setdefault("titles", {})
-    return data
+    loaded.setdefault("identities", {})
+    loaded.setdefault("titles", {})
+    return loaded
 
 
 def _save(data: dict[str, Any]) -> None:
@@ -95,7 +112,7 @@ def _safe_parse(title: str) -> dict[str, Any]:
         parsed = parse_title(title)
     except Exception:
         return {}
-    return parsed if isinstance(parsed, dict) else {}
+    return parsed
 
 
 def _magnet_hash(magnet: str | None) -> str:
@@ -117,8 +134,8 @@ def _identity_key(parsed: dict[str, Any]) -> str:
 
 def _choose_parse(event: dict[str, Any]) -> tuple[str, dict[str, Any], dict[str, Any]]:
     """Return the raw name, the parse used to identify it, and the parse used for the episode."""
-    filename = event.get("filename") if isinstance(event.get("filename"), str) else ""
-    title = event.get("title") if isinstance(event.get("title"), str) else ""
+    filename = _text(event.get("filename"))
+    title = _text(event.get("title"))
     from_file = _safe_parse(filename)
     from_title = _safe_parse(title)
     if from_file.get("title"):
@@ -148,8 +165,7 @@ def _identity_from_group(group: dict[str, Any], raw_title: str) -> dict[str, Any
 def _resolve_identity_direct(raw_title: str) -> dict[str, Any] | None:
     """Look up a plain title when torrent grouping has nothing to attach it to."""
     parsed = _safe_parse(raw_title)
-    query = parsed.get("title") if isinstance(parsed.get("title"), str) else ""
-    query = query.strip() or raw_title.strip()
+    query = _text(parsed.get("title")).strip() or raw_title.strip()
     if not query or not settings.TMDB_API_KEY:
         return None
     client = TMDBClient(settings.TMDB_API_KEY)
@@ -160,14 +176,15 @@ def _resolve_identity_direct(raw_title: str) -> dict[str, Any] | None:
     candidates = response.get("results") if isinstance(response, dict) else None
     if not isinstance(candidates, list):
         return None
-    for candidate in candidates:
-        if not isinstance(candidate, dict) or candidate.get("media_type") not in ("tv", "movie"):
+    for candidate in _dict_items(candidates):
+        if candidate.get("media_type") not in ("tv", "movie"):
             continue
         resolved = _details_for_match(client, candidate)
         if resolved is None:
             continue
         media_type, details = resolved
-        tmdb_id = details.get("id") if isinstance(details.get("id"), int) else candidate.get("id")
+        details_id = details.get("id")
+        tmdb_id = details_id if isinstance(details_id, int) else candidate.get("id")
         if not isinstance(tmdb_id, int):
             continue
         title = details.get("name") if media_type == "tv" else details.get("title")
@@ -252,12 +269,12 @@ def _remember_identity(raw_title: str, identity_parsed: dict[str, Any]) -> dict[
     key = _identity_key(identity_parsed)
     now = int(time.time() * 1000)
     with _catalog_lock:
-        cached = _load()["identities"].get(key)
-    if isinstance(cached, dict) and cached.get("unmatched"):
+        cached = _as_dict(_load()["identities"].get(key))
+    if cached is not None and cached.get("unmatched"):
         # Markers saved before "at" existed have no time and are retried once.
         if now - int(cached.get("at") or 0) < _UNMATCHED_RETRY_MS:
             return None
-    elif isinstance(cached, dict) and cached.get("tmdb_id"):
+    elif cached is not None and cached.get("tmdb_id"):
         return cached
     failures_before = failure_count()
     resolved = _resolve_identity(raw_title)
@@ -341,8 +358,7 @@ def process_event(event: dict[str, Any]) -> None:
         if not isinstance(item, dict):
             item = _blank_item(cached)
             titles[catalog_key] = item
-        label = event.get("filename") or event.get("title") or item["title"]
-        label_text = label if isinstance(label, str) else item["title"]
+        label_text = _text(event.get("filename")) or _text(event.get("title")) or _text(item.get("title"))
         if cached.get("backdrop_url") and not item.get("backdrop_url"):
             item["backdrop_url"] = cached.get("backdrop_url")
         _touch_download(item, _magnet_hash(event.get("magnet")), label_text, when)
@@ -361,7 +377,7 @@ def _record_activity(
 ) -> None:
     try:
         if kind == "search":
-            query = event.get("title") if isinstance(event.get("title"), str) else ""
+            query = _text(event.get("title"))
             dedupe = stats.search_dedupe_key(identity, query, when)
         elif kind == "download":
             dedupe = f"download:{identity.get('media_type')}:{identity.get('tmdb_id')}:{_magnet_hash(event.get('magnet'))}"
@@ -414,9 +430,7 @@ def _finished_at(item: dict[str, Any], entry: dict[str, Any]) -> int | None:
     if season is None or episode is None:
         return None
     latest = None
-    for watched in item.get("watched_episodes") or []:
-        if not isinstance(watched, dict):
-            continue
+    for watched in _dict_items(item.get("watched_episodes")):
         if _as_int(watched.get("season")) != season or _as_int(watched.get("episode")) != episode:
             continue
         at = _as_int(watched.get("at")) or 0
@@ -453,13 +467,12 @@ def _progress_matches(entry: dict[str, Any], episode_parsed: dict[str, Any], fil
 
 
 def _drop_progress(item: dict[str, Any], episode_parsed: dict[str, Any], filename: str) -> None:
-    progress = item.get("progress")
-    if not isinstance(progress, list):
+    if not isinstance(item.get("progress"), list):
         return
-    media_type = item.get("media_type")
+    media_type = str(item.get("media_type") or "")
     item["progress"] = [
-        entry for entry in progress
-        if not (isinstance(entry, dict) and _progress_matches(entry, episode_parsed, filename, str(media_type or "")))
+        entry for entry in _dict_items(item.get("progress"))
+        if not _progress_matches(entry, episode_parsed, filename, media_type)
     ]
 
 
@@ -478,8 +491,8 @@ def _touch_progress(
         return
     seasons = _parsed_seasons(episode_parsed)
     episode_number = _as_int(episode_parsed.get("episode"))
-    magnet = event.get("magnet") if isinstance(event.get("magnet"), str) else ""
-    entry = {
+    magnet = _text(event.get("magnet"))
+    entry: dict[str, Any] = {
         "position": position,
         "duration": duration,
         "at": when,
@@ -492,9 +505,8 @@ def _touch_progress(
         _drop_progress(item, episode_parsed, filename)
         return
     media_type = str(item.get("media_type") or "")
-    progress = [existing for existing in item.get("progress") or [] if isinstance(existing, dict)]
     progress = [
-        existing for existing in progress
+        existing for existing in _dict_items(item.get("progress"))
         if not _progress_matches(existing, episode_parsed, filename, media_type)
     ]
     progress.append(entry)
@@ -513,8 +525,8 @@ def _runtime_seconds(client: TMDBClient, item: dict[str, Any], entry: dict[str, 
         if season is None or episode is None:
             return 0
         payload = client.get_tv_season(int(item["tmdb_id"]), season)
-        for details in (payload or {}).get("episodes") or []:
-            if isinstance(details, dict) and details.get("episode_number") == episode:
+        for details in _dict_items((payload or {}).get("episodes")):
+            if details.get("episode_number") == episode:
                 runtime = details.get("runtime")
                 return float(runtime) * 60 if isinstance(runtime, int) and runtime > 0 else 0
     except Exception:
@@ -525,15 +537,10 @@ def _runtime_seconds(client: TMDBClient, item: dict[str, Any], entry: dict[str, 
 def _keep_watching(items: list[dict[str, Any]], client: TMDBClient | None = None) -> list[dict[str, Any]]:
     """Unfinished plays from the last 14 days, one card per title, newest first."""
     cutoff = int(time.time() * 1000) - 14 * 24 * 60 * 60 * 1000
-    cards = []
+    cards: list[dict[str, Any]] = []
     for item in items:
-        progress = item.get("progress")
-        if not isinstance(progress, list):
-            continue
-        current = []
-        for entry in progress:
-            if not isinstance(entry, dict):
-                continue
+        current: list[dict[str, Any]] = []
+        for entry in _dict_items(item.get("progress")):
             position = _as_float(entry.get("position"))
             duration = _as_float(entry.get("duration"))
             at = _as_int(entry.get("at")) or 0
@@ -550,8 +557,8 @@ def _keep_watching(items: list[dict[str, Any]], client: TMDBClient | None = None
         episode = _as_int(latest.get("episode"))
         if item.get("media_type") == "tv" and season is not None and episode is not None:
             card["subtitle"] = _episode_label(season, episode)
-        magnet = latest.get("magnet") if isinstance(latest.get("magnet"), str) and latest.get("magnet") else None
-        filename = latest.get("filename") if isinstance(latest.get("filename"), str) and latest.get("filename") else None
+        magnet = _text(latest.get("magnet")) or None
+        filename = _text(latest.get("filename")) or None
         position = _as_float(latest.get("position"))
         duration = _as_float(latest.get("duration"))
         if duration <= 0 and client is not None:
@@ -573,7 +580,7 @@ def _episode_label(season: int, episode: int) -> str:
 
 def _subtitle(item: dict[str, Any]) -> str | None:
     if item.get("media_type") == "tv":
-        episodes = [episode for episode in item.get("watched_episodes") or [] if isinstance(episode, dict)]
+        episodes = _dict_items(item.get("watched_episodes"))
         if episodes:
             latest = max(episodes, key=lambda episode: int(episode.get("at") or 0))
             season = _as_int(latest.get("season"))
@@ -602,8 +609,8 @@ def _card(item: dict[str, Any], rank: int | None = None) -> dict[str, Any]:
 
 def _upcoming_air_date(details: dict[str, Any]) -> str | None:
     """Air date of the next episode, when that date is today or later."""
-    episode = details.get("next_episode_to_air")
-    if not isinstance(episode, dict):
+    episode = _as_dict(details.get("next_episode_to_air"))
+    if episode is None:
         return None
     air_date = episode.get("air_date")
     if not isinstance(air_date, str) or not air_date:
@@ -619,7 +626,7 @@ def _upcoming_air_date(details: dict[str, Any]) -> str | None:
 
 def _watched_is_last_aired(item: dict[str, Any], details: dict[str, Any]) -> bool:
     """True when the latest watched episode is the latest one that has aired."""
-    episodes = [episode for episode in item.get("watched_episodes") or [] if isinstance(episode, dict)]
+    episodes = _dict_items(item.get("watched_episodes"))
     if not episodes:
         return False
     latest = max(episodes, key=lambda episode: int(episode.get("at") or 0))
@@ -687,10 +694,11 @@ def _classify_adult_activity(client: TMDBClient) -> None:
     with _catalog_lock:
         data = _load()
         changed = False
-        for identity in data.get("identities", {}).values():
-            if not isinstance(identity, dict):
+        for identity in _dict_items(list(data.get("identities", {}).values())):
+            media_type, tmdb_id = identity.get("media_type"), identity.get("tmdb_id")
+            if not isinstance(media_type, str) or not isinstance(tmdb_id, int):
                 continue
-            adult = classified.get((identity.get("media_type"), identity.get("tmdb_id")))
+            adult = classified.get((media_type, tmdb_id))
             if adult is not None and identity.get("adult") is not adult:
                 identity["adult"] = adult
                 changed = True
@@ -700,9 +708,8 @@ def _classify_adult_activity(client: TMDBClient) -> None:
 
 def _recent_stamp(item: dict[str, Any]) -> int:
     stamp = _as_int(item.get("watched_at")) or 0
-    for episode in item.get("watched_episodes") or []:
-        if isinstance(episode, dict):
-            stamp = max(stamp, _as_int(episode.get("at")) or 0)
+    for episode in _dict_items(item.get("watched_episodes")):
+        stamp = max(stamp, _as_int(episode.get("at")) or 0)
     return stamp
 
 
@@ -726,7 +733,7 @@ def watch_rows(events: list[dict[str, Any]]) -> dict[str, Any]:
     usable = [
         event
         for event in events
-        if isinstance(event, dict) and event.get("event") in ("progress", "watched")
+        if event.get("event") in ("progress", "watched")
     ]
     usable.sort(key=lambda event: _as_int(event.get("ts")) or 0)
     if len(usable) > 200:
@@ -800,10 +807,10 @@ def refresh_artwork() -> None:
 
 def catalog() -> list[dict[str, Any]]:
     """Titles already resolved, newest activity first."""
-    titles = _load().get("titles")
-    if not isinstance(titles, dict):
+    titles = _as_dict(_load().get("titles"))
+    if titles is None:
         return []
-    items = [item for item in titles.values() if isinstance(item, dict)]
+    items = _dict_items(list(titles.values()))
     items.sort(key=lambda item: int(item.get("updated_at") or 0), reverse=True)
     return items
 
@@ -852,10 +859,8 @@ def enqueue(events: list[dict[str, Any]]) -> int:
     start()
     queued = 0
     for event in events:
-        if not isinstance(event, dict):
-            continue
-        title = event.get("title") if isinstance(event.get("title"), str) else ""
-        filename = event.get("filename") if isinstance(event.get("filename"), str) else ""
+        title = _text(event.get("title"))
+        filename = _text(event.get("filename"))
         if not title.strip() and not filename.strip():
             continue
         _queue.put(event)
