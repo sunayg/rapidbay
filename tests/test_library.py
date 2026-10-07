@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import tempfile
@@ -409,3 +410,92 @@ def test_unmatched_marker_without_a_time_is_retried() -> None:
             json.dump(data, handle)
         process_event(_download(2))
         assert enrich.call_count == 2
+
+
+def _movie_identity(_results, _key):
+    return {
+        "groups": [{"tmdb_id": 438631, "media_type": "movie", "title": "Dune", "year": 2021, "poster_url": None}],
+        "other": [],
+    }
+
+
+def test_concurrent_downloads_all_reach_the_catalog() -> None:
+    import threading
+
+    with tempfile.TemporaryDirectory() as tmp, \
+            patch("app.library.settings.LIBRARY_PATH", os.path.join(tmp, "library.json")), \
+            patch("app.library.settings.TMDB_API_KEY", "key"), \
+            patch("app.library.stats.record"), \
+            patch("app.library.enrich_search_results", side_effect=_movie_identity):
+        errors: list[BaseException] = []
+
+        def download(index: int) -> None:
+            try:
+                process_event({
+                    "event": "download",
+                    "magnet": f"magnet:?xt=urn:btih:hash{index}",
+                    "title": "Dune 2021 1080p",
+                    "ts": index + 1,
+                })
+            except BaseException as error:
+                errors.append(error)
+
+        threads = [threading.Thread(target=download, args=(index,)) for index in range(24)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert errors == []
+        assert len(catalog()[0]["downloads"]) == 24
+        assert [name for name in os.listdir(tmp) if name.endswith(".tmp")] == []
+
+
+def test_failed_save_leaves_no_temporary_file_and_keeps_the_old_catalog() -> None:
+    from app.library import _load, _save
+
+    with tempfile.TemporaryDirectory() as tmp, \
+            patch("app.library.settings.LIBRARY_PATH", os.path.join(tmp, "library.json")):
+        _save({"identities": {}, "titles": {"a": {}}})
+        with patch("app.library.json.dump", side_effect=OSError("disk full")), contextlib.suppress(OSError):
+            _save({"identities": {}, "titles": {}})
+        assert _load()["titles"] == {"a": {}}
+        assert os.listdir(tmp) == ["library.json"]
+
+
+def test_failed_event_is_logged_and_retried_then_dropped() -> None:
+    from app import library
+
+    event = {"event": "download", "title": "Dune 2021", "ts": 1}
+    with patch("app.library.process_event", side_effect=RuntimeError("boom")), \
+            patch("app.library.log.debug") as debug, \
+            patch("app.library.log.write_log") as write_log, \
+            patch("app.library.threading.Timer") as timer:
+        library._handle(event)
+        retried = timer.call_args.kwargs["args"][0]
+        assert retried["_attempts"] == 1
+        assert timer.call_args.args[0] == library._RETRY_DELAY_SECONDS
+        timer.return_value.start.assert_called_once()
+
+        library._handle(retried)
+        second = timer.call_args.kwargs["args"][0]
+        assert second["_attempts"] == 2
+        assert timer.call_args.args[0] == library._RETRY_DELAY_SECONDS * 2
+
+        timer.reset_mock()
+        library._handle(second)
+        timer.assert_not_called()
+
+    assert write_log.call_count == 3
+    assert "dropped" in debug.call_args.args[0]
+
+
+def test_successful_event_is_not_retried() -> None:
+    from app import library
+
+    with patch("app.library.process_event") as process, \
+            patch("app.library.threading.Timer") as timer:
+        library._handle({"event": "download", "title": "Dune"})
+
+    process.assert_called_once()
+    timer.assert_not_called()

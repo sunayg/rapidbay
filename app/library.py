@@ -1,13 +1,16 @@
 """Resolve download and watch events to TMDB ids without blocking the request."""
 
+import contextlib
 import json
 import os
 import queue
+import tempfile
 import threading
 import time
 from datetime import date
 from typing import Any
 
+import log
 import settings
 import stats
 from result_grouping import (
@@ -22,6 +25,14 @@ from tmdb import TMDBClient, failure_count
 
 # A title TMDB confirmed it cannot match is looked up again after this long.
 _UNMATCHED_RETRY_MS = 24 * 60 * 60 * 1000
+
+# A failed event is tried again this many times in all, waiting longer each time.
+_MAX_EVENT_ATTEMPTS = 3
+_RETRY_DELAY_SECONDS = 30
+
+# Held for every load, change, and save of library.json. Lookups on TMDB happen
+# outside it, so one slow title does not block the others.
+_catalog_lock = threading.RLock()
 
 _queue: queue.Queue[dict[str, Any]] = queue.Queue()
 _start_lock = threading.Lock()
@@ -55,10 +66,26 @@ def _load() -> dict[str, Any]:
 
 def _save(data: dict[str, Any]) -> None:
     path = _store_path()
-    temporary = path + ".tmp"
-    with open(temporary, "w", encoding="utf-8") as handle:
-        json.dump(data, handle)
-    os.replace(temporary, path)
+    descriptor, temporary = tempfile.mkstemp(
+        dir=os.path.dirname(path) or ".", prefix=os.path.basename(path) + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(data, handle)
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(temporary)
+        raise
+
+
+def _log_failure(message: str) -> None:
+    """Write the current exception and a line saying what failed to the error log."""
+    try:
+        log.debug(f"library: {message}")
+        log.write_log()
+    except Exception:
+        return
 
 
 def _safe_parse(title: str) -> dict[str, Any]:
@@ -223,10 +250,9 @@ def _remember_identity(raw_title: str, identity_parsed: dict[str, Any]) -> dict[
     if not identity_parsed.get("title"):
         return None
     key = _identity_key(identity_parsed)
-    data = _load()
-    identities: dict[str, Any] = data["identities"]
-    cached = identities.get(key)
     now = int(time.time() * 1000)
+    with _catalog_lock:
+        cached = _load()["identities"].get(key)
     if isinstance(cached, dict) and cached.get("unmatched"):
         # Markers saved before "at" existed have no time and are retried once.
         if now - int(cached.get("at") or 0) < _UNMATCHED_RETRY_MS:
@@ -239,11 +265,15 @@ def _remember_identity(raw_title: str, identity_parsed: dict[str, Any]) -> dict[
         # Only a TMDB answer of "no match" is remembered. A timeout or error is
         # tried again on the next event.
         if settings.TMDB_API_KEY and failure_count() == failures_before:
-            identities[key] = {"unmatched": True, "at": now}
-            _save(data)
+            with _catalog_lock:
+                data = _load()
+                data["identities"][key] = {"unmatched": True, "at": now}
+                _save(data)
         return None
-    identities[key] = resolved
-    _save(data)
+    with _catalog_lock:
+        data = _load()
+        data["identities"][key] = resolved
+        _save(data)
     return resolved
 
 
@@ -304,20 +334,21 @@ def process_event(event: dict[str, Any]) -> None:
     if kind != "download":
         return
     catalog_key = f"{cached['media_type']}:{cached['tmdb_id']}"
-    data = _load()
-    titles: dict[str, Any] = data["titles"]
-    item = titles.get(catalog_key)
-    if not isinstance(item, dict):
-        item = _blank_item(cached)
-        titles[catalog_key] = item
-    label = event.get("filename") or event.get("title") or item["title"]
-    label_text = label if isinstance(label, str) else item["title"]
-    if cached.get("backdrop_url") and not item.get("backdrop_url"):
-        item["backdrop_url"] = cached.get("backdrop_url")
-    _touch_download(item, _magnet_hash(event.get("magnet")), label_text, when)
-    if when >= int(item.get("updated_at") or 0):
-        item["updated_at"] = when
-    _save(data)
+    with _catalog_lock:
+        data = _load()
+        titles: dict[str, Any] = data["titles"]
+        item = titles.get(catalog_key)
+        if not isinstance(item, dict):
+            item = _blank_item(cached)
+            titles[catalog_key] = item
+        label = event.get("filename") or event.get("title") or item["title"]
+        label_text = label if isinstance(label, str) else item["title"]
+        if cached.get("backdrop_url") and not item.get("backdrop_url"):
+            item["backdrop_url"] = cached.get("backdrop_url")
+        _touch_download(item, _magnet_hash(event.get("magnet")), label_text, when)
+        if when >= int(item.get("updated_at") or 0):
+            item["updated_at"] = when
+        _save(data)
     _record_activity(kind, cached, event, when, episode_parsed)
 
 
@@ -346,7 +377,7 @@ def _record_activity(
             return
         stats.record(kind, identity, when, dedupe)
     except Exception:
-        return
+        _log_failure(f"could not record {kind} activity")
 
 
 def _as_float(value: Any) -> float:
@@ -636,9 +667,7 @@ def _classify_adult_activity(client: TMDBClient) -> None:
     pending = stats.unclassified_titles()
     if not pending:
         return
-    data = _load()
-    identities = data.get("identities", {})
-    changed = False
+    classified: dict[tuple[str, int], bool] = {}
     for media_type, tmdb_id in pending:
         try:
             details = client.get_tv_details(tmdb_id) if media_type == "tv" else client.get_movie_details(tmdb_id)
@@ -648,14 +677,21 @@ def _classify_adult_activity(client: TMDBClient) -> None:
             continue
         adult = _is_adult_details(details)
         stats.set_adult(media_type, tmdb_id, adult)
-        for identity in identities.values():
+        classified[(media_type, tmdb_id)] = adult
+    if not classified:
+        return
+    with _catalog_lock:
+        data = _load()
+        changed = False
+        for identity in data.get("identities", {}).values():
             if not isinstance(identity, dict):
                 continue
-            if identity.get("media_type") == media_type and identity.get("tmdb_id") == tmdb_id and identity.get("adult") is not adult:
+            adult = classified.get((identity.get("media_type"), identity.get("tmdb_id")))
+            if adult is not None and identity.get("adult") is not adult:
                 identity["adult"] = adult
                 changed = True
-    if changed:
-        _save(data)
+        if changed:
+            _save(data)
 
 
 def _recent_stamp(item: dict[str, Any]) -> int:
@@ -722,23 +758,31 @@ def home() -> dict[str, Any]:
 
 def refresh_artwork() -> None:
     """Fill in backdrop images for titles resolved before artwork was stored."""
-    data = _load()
-    changed = False
-    for identity in data.get("identities", {}).values():
-        if not isinstance(identity, dict) or not identity.get("tmdb_id") or identity.get("backdrop_url"):
-            continue
-        resolved = _resolve_identity(str(identity.get("title") or ""))
+    with _catalog_lock:
+        wanted = [
+            (key, str(identity.get("title") or ""))
+            for key, identity in _load().get("identities", {}).items()
+            if isinstance(identity, dict) and identity.get("tmdb_id") and not identity.get("backdrop_url")
+        ]
+    for key, title in wanted:
+        resolved = _resolve_identity(title)
         if not resolved or not resolved.get("backdrop_url"):
             continue
-        identity["backdrop_url"] = resolved["backdrop_url"]
-        if resolved.get("poster_url") and not identity.get("poster_url"):
-            identity["poster_url"] = resolved["poster_url"]
-        catalog_key = f"{identity['media_type']}:{identity['tmdb_id']}"
-        item = data.get("titles", {}).get(catalog_key)
-        if isinstance(item, dict):
-            item["backdrop_url"] = identity["backdrop_url"]
-            if identity.get("poster_url") and not item.get("poster_url"):
-                item["poster_url"] = identity["poster_url"]
+        with _catalog_lock:
+            data = _load()
+            identity = data.get("identities", {}).get(key)
+            if not isinstance(identity, dict) or identity.get("backdrop_url"):
+                continue
+            identity["backdrop_url"] = resolved["backdrop_url"]
+            if resolved.get("poster_url") and not identity.get("poster_url"):
+                identity["poster_url"] = resolved["poster_url"]
+            catalog_key = f"{identity['media_type']}:{identity['tmdb_id']}"
+            item = data.get("titles", {}).get(catalog_key)
+            if isinstance(item, dict):
+                item["backdrop_url"] = identity["backdrop_url"]
+                if identity.get("poster_url") and not item.get("poster_url"):
+                    item["poster_url"] = identity["poster_url"]
+            _save(data)
         try:
             stats.update_artwork(
                 identity["media_type"],
@@ -747,10 +791,7 @@ def refresh_artwork() -> None:
                 identity.get("backdrop_url"),
             )
         except Exception:
-            pass
-        changed = True
-    if changed:
-        _save(data)
+            _log_failure(f"could not update artwork for {title}")
 
 
 def catalog() -> list[dict[str, Any]]:
@@ -763,17 +804,31 @@ def catalog() -> list[dict[str, Any]]:
     return items
 
 
+def _handle(event: dict[str, Any]) -> None:
+    """Process one event. A failure is logged and the event is tried again later."""
+    try:
+        process_event(event)
+    except Exception:
+        attempts = int(event.get("_attempts") or 0) + 1
+        label = event.get("title") or event.get("filename") or "?"
+        if attempts >= _MAX_EVENT_ATTEMPTS:
+            _log_failure(f"dropped {event.get('event')} event for {label!r} after {attempts} attempts")
+            return
+        _log_failure(f"{event.get('event')} event for {label!r} failed, attempt {attempts}")
+        retry = threading.Timer(_RETRY_DELAY_SECONDS * attempts, _queue.put, args=[{**event, "_attempts": attempts}])
+        retry.daemon = True
+        retry.start()
+
+
 def _worker() -> None:
     try:
         refresh_artwork()
     except Exception:
-        pass
+        _log_failure("could not refresh artwork")
     while True:
         event = _queue.get()
         try:
-            process_event(event)
-        except Exception:
-            pass
+            _handle(event)
         finally:
             _queue.task_done()
 
