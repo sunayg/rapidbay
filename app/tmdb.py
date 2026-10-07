@@ -3,7 +3,7 @@
 import copy
 import threading
 import time
-from typing import Any
+from typing import Any, cast
 
 import requests
 
@@ -134,9 +134,9 @@ class TMDBClient:
             data = response.json()
             _record_success()
             if isinstance(data, dict):
-                self._write_cache(cache_key, data)
-                copied = copy.deepcopy(data)
-                return copied if isinstance(copied, dict) else data
+                payload = cast("dict[str, Any]", data)
+                self._write_cache(cache_key, payload)
+                return copy.deepcopy(payload)
             return None
         except Exception:
             # Network failures and invalid JSON should not interrupt search results.
@@ -152,8 +152,7 @@ class TMDBClient:
             return None
         if cached is _CACHE_MISS or not isinstance(cached, dict):
             return None
-        copied = copy.deepcopy(cached)
-        return copied if isinstance(copied, dict) else None
+        return copy.deepcopy(cast("dict[str, Any]", cached))
 
     def _write_cache(self, key: tuple[Any, ...], data: dict[str, Any]) -> None:
         if self._cache is None:

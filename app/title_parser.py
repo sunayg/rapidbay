@@ -1,6 +1,6 @@
 import datetime
 import re
-from typing import Any
+from typing import Any, cast
 
 import PTN
 
@@ -73,7 +73,7 @@ def _as_int(value: Any) -> int | None:
 
 
 def _year_from_excess(value: Any) -> int | None:
-    tokens = value if isinstance(value, list) else [value]
+    tokens = cast("list[Any]", value) if isinstance(value, list) else [value]
     for token in tokens:
         if not isinstance(token, str):
             continue
