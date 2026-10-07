@@ -19,13 +19,21 @@ from typing import Annotated, Any, AsyncIterator, Dict, List, cast, override
 import diskcache
 import http_cache
 import jackett
+import library
 import log
 import prowlarr
 import PTN
 import requests
 import requests.adapters
 import requests.utils
-import library
+import settings
+import torrent
+from common import path_hierarchy
+from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
+from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
 from result_grouping import (
     FIRST_RENDER_LOOKUPS,
     MAX_TMDB_LOOKUPS,
@@ -35,16 +43,8 @@ from result_grouping import (
     resolve_title,
     season_episode_details,
 )
-from tmdb import TMDBClient, tmdb_disk_cache
-import settings
-import torrent
-from common import path_hierarchy
-from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field
-from rapidbaydaemon import FileStatus, RapidBayDaemon, get_filepaths
 from starlette.middleware.base import BaseHTTPMiddleware
+from tmdb import TMDBClient, tmdb_disk_cache
 
 
 # Response models for OpenAPI schema
@@ -692,7 +692,7 @@ async def rich_search_events(searchterm: str = "", _: None = Depends(authorize))
         rest = lookups[FIRST_RENDER_LOOKUPS:]
         previews = await asyncio.gather(*[lookup_one(lookup, False, None) for lookup in first]) if first else []
         search_responses: Dict[str, Dict[str, Any] | None] = {}
-        for lookup, (groups, search_response) in zip(first, previews):
+        for lookup, (groups, search_response) in zip(first, previews, strict=True):
             search_responses[lookup.normalized] = search_response
             if groups:
                 assembler.apply(lookup.normalized, groups)
@@ -707,7 +707,7 @@ async def rich_search_events(searchterm: str = "", _: None = Depends(authorize))
             if first
             else []
         )
-        for lookup, (groups, _search_response) in zip(first, details):
+        for lookup, (groups, _search_response) in zip(first, details, strict=True):
             if groups:
                 assembler.apply(lookup.normalized, groups)
             elif lookup.normalized not in assembler.resolved:

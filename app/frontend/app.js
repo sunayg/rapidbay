@@ -338,8 +338,18 @@
         return es;
     }
 
-    function reportLibraryEvents(events) {
-        if (!events || !events.length) {
+    // Rich Content is opt-in. With it off, nothing is sent to the library or
+    // charts endpoints and the home, search and player screens stay classic.
+    function richContentOn() {
+        try {
+            return localStorage.getItem("richContentEnabled") === "true";
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function reportLibraryEvents(events, onSuccess) {
+        if (!events || !events.length || !richContentOn()) {
             return;
         }
         if (!document.cookie) {
@@ -350,14 +360,14 @@
             method: "POST",
             contentType: "application/json",
             data: JSON.stringify({ events: events }),
+            success: onSuccess,
         });
     }
 
     function syncLibraryFromLocalHistory() {
-        if (window.sessionStorage.getItem("rapidbayLibrarySync")) {
+        if (!richContentOn() || window.sessionStorage.getItem("rapidbayLibrarySync")) {
             return;
         }
-        window.sessionStorage.setItem("rapidbayLibrarySync", "1");
         var events = [];
         var magnetsByHash = {};
         getHistory().forEach(function (entry) {
@@ -399,7 +409,11 @@
                 });
             });
         });
-        reportLibraryEvents(events);
+        // Mark the import done only once the server has it, so a failed request
+        // is tried again on the next visit.
+        reportLibraryEvents(events, function () {
+            window.sessionStorage.setItem("rapidbayLibrarySync", "1");
+        });
     }
 
     function saveToHistory(magnet) {
@@ -1113,6 +1127,7 @@
                         navigator.userAgent
                     ),
                 isChrome: window.isChrome,
+                richContentEnabled: richContentOn(),
                 hovering: false,
                 openMenu: "",
                 paused: false,
@@ -1141,6 +1156,9 @@
             },
             controlsOn: function () {
                 return this.hovering || !!this.openMenu;
+            },
+            fileLink: function () {
+                return window.location.origin + this.url;
             },
             displayTitle: function () {
                 var name = this.filename || "";
@@ -1261,6 +1279,12 @@
                 this.duration = isFinite(video.duration) ? video.duration : 0;
                 this.volume = video.volume;
                 this.muted = video.muted || video.volume === 0;
+            },
+            onVideoClick: function () {
+                // Classic playback keeps the browser's own controls and click handling.
+                if (this.richContentEnabled) {
+                    this.togglePlay();
+                }
             },
             togglePlay: function () {
                 this.openMenu = "";
@@ -1622,7 +1646,7 @@
             },
             placeCues: function (raised) {
                 var video = this.videoEl();
-                if (!video) {
+                if (!video || !this.richContentEnabled) {
                     return;
                 }
                 for (var i = 0; i < video.textTracks.length; i++) {
@@ -1772,6 +1796,15 @@
             var videoUrl = window.location.origin + self.url;
             var isHLS = self.url.indexOf(".m3u8") !== -1;
             var savedPosition = getVideoPosition(self.magnet, self.filename);
+            // While a stream is still being transcoded, video.duration is only the
+            // length written so far. It is treated as unknown until hls.js reports
+            // a finished playlist, so the end of that partial length never counts
+            // as the end of the file.
+            self.streamLive = isHLS;
+            function knownDuration() {
+                return self.streamLive ? 0 : video.duration;
+            }
+            self.notedWatch = false;
 
             if (isHLS && typeof Hls !== "undefined" && Hls.isSupported()) {
                 var errorRecoveries = 0;
@@ -1815,6 +1848,9 @@
                             }
                         }
                     }
+                });
+                self.hls.on(Hls.Events.LEVEL_UPDATED, function (event, data) {
+                    self.streamLive = !!(data && data.details && data.details.live);
                 });
                 self.hls.loadSource(videoUrl);
                 self.hls.attachMedia(video);
@@ -1903,31 +1939,33 @@
 
             // Save position periodically and report unfinished plays for Keep watching.
             self.positionInterval = setInterval(function () {
-                if (!video.paused && video.currentTime > 0) {
-                    saveVideoPosition(self.magnet, self.filename, video.currentTime, video.duration);
-                    reportPlaybackProgress(self.magnet, self.filename, video.currentTime, video.duration, false);
+                if (!self.notedWatch && !video.paused && video.currentTime > 0) {
+                    saveVideoPosition(self.magnet, self.filename, video.currentTime, knownDuration());
+                    reportPlaybackProgress(self.magnet, self.filename, video.currentTime, knownDuration(), false);
                 }
             }, 5000);
 
             // Save position on pause
             video.addEventListener("pause", function () {
-                saveVideoPosition(self.magnet, self.filename, video.currentTime, video.duration);
-                reportPlaybackProgress(self.magnet, self.filename, video.currentTime, video.duration, true);
+                if (self.notedWatch) {
+                    return;
+                }
+                saveVideoPosition(self.magnet, self.filename, video.currentTime, knownDuration());
+                reportPlaybackProgress(self.magnet, self.filename, video.currentTime, knownDuration(), true);
             });
 
             // Credits usually start before the file ends. Count the title as
             // watched at 98% or with under two minutes left, whichever comes first.
-            var notedWatch = false;
             function noteWatched() {
-                if (notedWatch) {
+                if (self.notedWatch) {
                     return;
                 }
-                notedWatch = true;
+                self.notedWatch = true;
                 clearVideoPosition(self.magnet, self.filename);
                 markFileCompleted(self.magnet, self.filename);
             }
             function playbackCountsAsWatched() {
-                return progressCountsAsWatched(video.currentTime, video.duration);
+                return progressCountsAsWatched(video.currentTime, knownDuration());
             }
             video.addEventListener("timeupdate", function () {
                 if (playbackCountsAsWatched()) {
@@ -2111,9 +2149,12 @@
                     "addtrack",
                     this.addTrackListener
                 );
-                if (video.currentTime > 0 && !progressCountsAsWatched(video.currentTime, video.duration)) {
-                    saveVideoPosition(this.magnet, this.filename, video.currentTime, video.duration);
-                    reportPlaybackProgress(this.magnet, this.filename, video.currentTime, video.duration, true);
+                // A stream that is still transcoding has no known length yet, so the
+                // duration is left out and the saved one (if any) is kept.
+                var finalDuration = this.streamLive ? 0 : video.duration;
+                if (!this.notedWatch && video.currentTime > 0 && !progressCountsAsWatched(video.currentTime, finalDuration)) {
+                    saveVideoPosition(this.magnet, this.filename, video.currentTime, finalDuration);
+                    reportPlaybackProgress(this.magnet, this.filename, video.currentTime, finalDuration, true);
                 }
             }
         },
@@ -2354,6 +2395,10 @@
             onRichToggle: function () {
                 localStorage.setItem("richContentEnabled", this.richContentEnabled ? "true" : "false");
                 this.applyPageBackground();
+                if (this.richContentEnabled) {
+                    syncLibraryFromLocalHistory();
+                    this.loadHome();
+                }
             },
             applyPageBackground: function () {
                 var color = this.richContentEnabled ? "#141414" : "#000";
@@ -2515,8 +2560,10 @@
         mounted: function () {
             this.applyPageBackground();
             this.searchHistory = getSearchHistory();
-            syncLibraryFromLocalHistory();
-            this.loadHome();
+            if (this.richContentEnabled) {
+                syncLibraryFromLocalHistory();
+                this.loadHome();
+            }
             var self = this;
             this.onHomeResize = function () {
                 self.refreshRails();
@@ -2541,12 +2588,10 @@
                     var code = e.keyCode || e.which;
                     if (code === 13) lowername = "enter";
                 }
-                var isTopbarButton = document.activeElement && document.activeElement.classList.contains("home-shortcut");
+                var isTopbarButton = document.activeElement && (document.activeElement.classList.contains("home-shortcut") || !!document.activeElement.closest(".topbar-classic"));
                 var isHistoryItem = document.activeElement && (document.activeElement.classList.contains("search-chip") || document.activeElement.classList.contains("search-history-item"));
                 var isRecentItem = document.activeElement && (document.activeElement.classList.contains("billboard-card") || document.activeElement.classList.contains("poster-card") || document.activeElement.classList.contains("home-basic-item") || document.activeElement.classList.contains("search-chip") || document.activeElement.classList.contains("search-history-item") || document.activeElement.classList.contains("search-history-clear") || document.activeElement.classList.contains("home-shortcut") || document.activeElement.classList.contains("row-nudge"));
-                var isHomeToggle = document.activeElement && document.activeElement.closest(".rich-toggle-label");
                 var isSearchInput = document.activeElement && document.activeElement.classList.contains("form-control");
-                var homeStops = document.querySelectorAll(".rich-toggle-label input, .billboard-card, .poster-card, .home-basic-item, .search-chip, .search-history-item, .search-history-clear, .home-shortcut, .row-nudge:not([hidden])");
                 var spatial = !!document.querySelector(".home-root");
                 if (lowername === "enter" && !isSearchInput && (isTopbarButton || isHistoryItem || isRecentItem)) {
                     e.preventDefault();
@@ -2559,29 +2604,30 @@
                     }
                     focusByDirection(lowername.replace("arrow", ""));
                 } else if (lowername === "arrowdown") {
-                    if (isSearchInput) {
-                        return;
-                    }
+                    // Classic home: same keys as before Rich Content existed.
                     e.preventDefault();
-                    if (isHistoryItem || isRecentItem || isHomeToggle) {
+                    if (isSearchInput) {
+                        var firstItem = document.querySelector(".search-history-item");
+                        if (firstItem) {
+                            firstItem.focus();
+                        }
+                    } else if (isHistoryItem) {
                         focusNextElement();
                     } else {
                         $("input.form-control").focus().click();
                     }
                 } else if (lowername === "arrowup") {
-                    if (isSearchInput) {
-                        return;
-                    }
                     e.preventDefault();
-                    if (isHistoryItem || isRecentItem || isHomeToggle) {
-                        var idx = Array.prototype.indexOf.call(homeStops, document.activeElement);
-                        if (idx <= 0) {
+                    if (isHistoryItem) {
+                        var items = document.querySelectorAll(".search-history-item");
+                        var idx = Array.prototype.indexOf.call(items, document.activeElement);
+                        if (idx === 0) {
                             $("input.form-control").focus().click();
                         } else {
                             focusPrevElement();
                         }
                     } else if (!isTopbarButton) {
-                        $(".topbar-home button:first").focus();
+                        $(".topbar-classic button:first").focus();
                     }
                 } else if (lowername === "arrowright" && !isSearchInput) {
                     e.preventDefault();
@@ -2966,6 +3012,9 @@
             },
             loadLibrary: function () {
                 var self = this;
+                if (!this.richContentEnabled && !this.pinnedTitle) {
+                    return;
+                }
                 self.libraryTitles = readLocalTitles();
                 fetchWatchRows(function () {
                     self.libraryTitles = readLocalTitles();

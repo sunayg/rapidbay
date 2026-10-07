@@ -103,7 +103,7 @@
                       </div>
                     </form>
                     <div v-if="searchHistory.length > 0" class="search-history">
-                      <div tabindex="0" v-for="term in searchHistory.slice(0, 4)" @click="onHistoryClick(term)" class="search-history-item">{{ term }}</div>
+                      <div tabindex="0" v-for="term in searchHistory" @click="onHistoryClick(term)" class="search-history-item">{{ term }}</div>
                     </div>
                   </div>
                 </div>
@@ -461,8 +461,28 @@
         </script>
 
         <script type="text/x-template" id="player-template">
-                 <div class="video_wrapper" :class="{ 'controls-hidden': !controlsOn }">
-                   <div class="topbar topbar-flex player-top" v-show="controlsOn">
+                 <div class="video_wrapper" :class="{ 'controls-hidden': richContentEnabled && !controlsOn }">
+                   <div class="topbar topbar-flex" v-if="!richContentEnabled && hovering">
+                       <button @click="back()" class="btn btn-dark backarrow">
+                         <div class="icon back_icon"/>
+                       </button>
+                       <div class="filename-truncate">
+                           <a tabindex="-1" :href="fileLink" class="video_url">
+                               {{decodeURIComponent(url.split("/").pop())}}
+                           </a>
+                       </div>
+                       <span v-if="downloadProgress !== null && downloadProgress < 1" class="download-progress-badge">
+                           {{Math.round(downloadProgress * 100)}}%
+                           <span v-if="downloadStatusLabel" class="download-progress-tooltip">{{downloadStatusLabel}}</span>
+                       </span>
+                       <div class="buttons" v-if="supported">
+                           <chromecast-button v-if="url && isDesktop && isChrome" :video-url="url"/>
+                           <caption-button v-if="url"/>
+                           <favorite-button :magnet="magnet" :filename="filename"/>
+                           <fullscreen-button/>
+                       </div>
+                   </div>
+                   <div class="topbar topbar-flex player-top" v-if="richContentEnabled" v-show="controlsOn">
                        <button @click="back()" class="btn btn-dark backarrow" aria-label="Back">
                          <div class="icon back_icon"/>
                        </button>
@@ -478,8 +498,10 @@
                    <video
                 poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
                 disablepictureinpicture
+                :controls="!richContentEnabled"
+                :controlslist="richContentEnabled ? null : 'nodownload noplaybackrate'"
                 v-if="supported && url" autoplay playsinline tabindex="0"
-                @click="togglePlay"
+                @click="onVideoClick"
             >
                        <track v-for="subtitle in subtitles"
                            :label="languageName(subtitle.language)" kind="subtitles"
@@ -488,7 +510,7 @@
                            :id="subtitle.url"
                        >
                    </video>
-                   <div class="player-controls" v-show="controlsOn && supported" @click.stop>
+                   <div class="player-controls" v-if="richContentEnabled" v-show="controlsOn && supported" @click.stop>
                        <div class="player-progress">
                            <input class="player-scrub" type="range" min="0" max="1000" :value="scrubValue" :style="{ '--progress': progressPercent }" @input="onScrub" aria-label="Seek">
                            <span class="player-remaining">{{ remainingLabel }}</span>

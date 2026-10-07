@@ -63,5 +63,4 @@ WORKDIR /app
 
 ENV USE_NGINX=1 DATA_DIR=/tmp FRONTEND_DIR=/app/frontend KODI_ADDON_DIR=/app/kodi.addon
 
-# Repo is checked out with CRLF on Windows; strip CR before executing.
-CMD ["bash", "-c", "sed 's/\\r$//' run.sh | bash"]
+CMD ["./run.sh"]

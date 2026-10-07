@@ -1,8 +1,8 @@
 """Route tests for the TMDB-enriched search endpoint."""
 
 from collections.abc import Iterator
-from unittest.mock import Mock
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient

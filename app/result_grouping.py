@@ -101,10 +101,7 @@ def _details_for_match(
     first_type, second_type = ("tv", "movie") if media_type == "tv" else ("movie", "tv")
     for candidate_type in (first_type, second_type):
         try:
-            if candidate_type == "tv":
-                details = client.get_tv_details(tmdb_id)
-            else:
-                details = client.get_movie_details(tmdb_id)
+            details = client.get_tv_details(tmdb_id) if candidate_type == "tv" else client.get_movie_details(tmdb_id)
         except Exception:
             details = None
         if isinstance(details, dict) and details:
@@ -135,7 +132,7 @@ def _card_details(client: TMDBClient, details: dict[str, Any]) -> dict[str, Any]
     vote_average = None
     vote = details.get("vote_average")
     vote_count = details.get("vote_count")
-    if isinstance(vote, (int, float)) and not isinstance(vote, bool) and vote_count != 0:
+    if isinstance(vote, int | float) and not isinstance(vote, bool) and vote_count != 0:
         vote_average = round(float(vote), 1)
 
     backdrop_url = None
@@ -168,7 +165,7 @@ def _text(value: Any) -> str | None:
 
 def _rating(details: dict[str, Any]) -> float | None:
     vote = details.get("vote_average")
-    if not isinstance(vote, (int, float)) or isinstance(vote, bool) or details.get("vote_count") == 0:
+    if not isinstance(vote, int | float) or isinstance(vote, bool) or details.get("vote_count") == 0:
         return None
     return round(float(vote), 1)
 
@@ -775,10 +772,7 @@ class SearchAssembler:
         self.resolved.add(normalized)
 
     def _used_by_others(self, key: tuple[str, int], normalized: str) -> bool:
-        for other, keys in self.matched.items():
-            if other != normalized and key in keys:
-                return True
-        return False
+        return any(other != normalized and key in keys for other, keys in self.matched.items())
 
     def snapshot(self, *, final: bool = False) -> dict[str, Any]:
         for group in self.groups_by_tmdb.values():

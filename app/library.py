@@ -442,9 +442,13 @@ def _progress_matches(entry: dict[str, Any], episode_parsed: dict[str, Any], fil
         return True
     seasons = _parsed_seasons(episode_parsed)
     episode_number = _as_int(episode_parsed.get("episode"))
-    if len(seasons) == 1 and episode_number is not None:
-        if entry.get("season") == seasons[0] and entry.get("episode") == episode_number:
-            return True
+    if (
+        len(seasons) == 1
+        and episode_number is not None
+        and entry.get("season") == seasons[0]
+        and entry.get("episode") == episode_number
+    ):
+        return True
     return bool(filename) and entry.get("filename") == filename
 
 
