@@ -13,7 +13,7 @@ from app import app as app_module
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     """Create a client without entering the app lifespan (which starts the daemon)."""
-    app_module.app.dependency_overrides[app_module.authorize] = Mock(return_value=None)
+    app_module.app.dependency_overrides[app_module.authorize] = lambda: None
     try:
         yield TestClient(app_module.app)
     finally:
@@ -253,12 +253,13 @@ def test_search_more_than_lookup_limit_enriches_all_results_but_tmdb_caps_lookup
 
     clients: list[FakeTMDBClient] = []
 
-    def make_client(api_key: str) -> FakeTMDBClient:
+    def make_client(api_key: str, cache: object = None) -> FakeTMDBClient:
         client_instance = FakeTMDBClient(api_key)
         clients.append(client_instance)
         return client_instance
 
     monkeypatch.setattr(result_grouping, "TMDBClient", make_client)
+    monkeypatch.setattr(result_grouping, "tmdb_disk_cache", lambda: None)
 
     response = client.get("/api/rich_search/many")
 
