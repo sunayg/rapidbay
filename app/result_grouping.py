@@ -4,7 +4,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, cast
 
 from title_parser import parse_title
 from tmdb import TMDBClient, is_unavailable, tmdb_disk_cache
@@ -117,14 +117,14 @@ def _card_details(client: TMDBClient, details: dict[str, Any]) -> dict[str, Any]
     genres: list[str] = []
     raw_genres = details.get("genres")
     if isinstance(raw_genres, list):
-        for genre in raw_genres:
-            name = genre.get("name") if isinstance(genre, dict) else None
+        for genre in cast("list[Any]", raw_genres):
+            name = cast("dict[str, Any]", genre).get("name") if isinstance(genre, dict) else None
             if isinstance(name, str) and name.strip() and name.strip() not in genres:
                 genres.append(name.strip())
     if not genres:
         genre_ids = details.get("genre_ids")
         if isinstance(genre_ids, list):
-            for genre_id in genre_ids:
+            for genre_id in cast("list[Any]", genre_ids):
                 name = _GENRE_NAMES.get(_as_int(genre_id) or -1)
                 if name and name not in genres:
                     genres.append(name)
@@ -196,6 +196,7 @@ def _episode_card(client: TMDBClient, episode: Any) -> dict[str, Any] | None:
     """Card fields shared by last_episode_to_air and next_episode_to_air."""
     if not isinstance(episode, dict):
         return None
+    episode = cast("dict[str, Any]", episode)
     season_number = _as_int(episode.get("season_number"))
     episode_number = _as_int(episode.get("episode_number"))
     air_date = _text(episode.get("air_date"))
@@ -243,18 +244,20 @@ def _next_episode_airing_today(client: TMDBClient, details: dict[str, Any]) -> d
 
 def _count_episode_releases(group: dict[str, Any], season_number: int, episode_number: int) -> int:
     """Releases parsed as this episode. Season packs are not counted."""
-    seasons = group.get("seasons")
-    if not isinstance(seasons, dict):
+    raw_seasons = group.get("seasons")
+    if not isinstance(raw_seasons, dict):
         return 0
+    seasons = cast("dict[int, list[tuple[int | None, str, dict[str, Any]]]]", raw_seasons)
     entries = seasons.get(season_number) or []
     return sum(1 for episode, _, _ in entries if episode == episode_number)
 
 
 def _promote_today_next_episode(group: dict[str, Any]) -> None:
     """Show today's next episode as Latest once enough releases for it exist."""
-    pending = group.get("_next_episode_today")
-    if not isinstance(pending, dict):
+    raw_pending = group.get("_next_episode_today")
+    if not isinstance(raw_pending, dict):
         return
+    pending = cast("dict[str, Any]", raw_pending)
     season_number = pending.get("season_number")
     episode_number = pending.get("episode_number")
     if not isinstance(season_number, int) or not isinstance(episode_number, int):
@@ -272,9 +275,10 @@ def season_episode_details(client: TMDBClient, payload: dict[str, Any] | None) -
         return []
 
     episodes: list[dict[str, Any]] = []
-    for episode in raw_episodes:
-        if not isinstance(episode, dict):
+    for raw_episode in cast("list[Any]", raw_episodes):
+        if not isinstance(raw_episode, dict):
             continue
+        episode = cast("dict[str, Any]", raw_episode)
         episode_number = _as_int(episode.get("episode_number"))
         if episode_number is None:
             continue
@@ -360,7 +364,7 @@ def _parsed_seasons(parsed: dict[str, Any]) -> list[int]:
     raw_seasons = parsed.get("seasons")
     if isinstance(raw_seasons, list):
         seasons: list[int] = []
-        for item in raw_seasons:
+        for item in cast("list[Any]", raw_seasons):
             number = _as_int(item)
             if number is not None and number not in seasons:
                 seasons.append(number)
@@ -431,7 +435,7 @@ def _group_result_count(group: dict[str, Any]) -> int:
     if group["media_type"] == "tv":
         seasons = group["seasons"]
         if isinstance(seasons, dict):
-            return sum(len(episodes) for episodes in seasons.values())
+            return sum(len(episodes) for episodes in cast("dict[Any, list[Any]]", seasons).values())
         return sum(len(season.get("episodes") or []) for season in seasons)
     results = group.get("results")
     return len(results) if isinstance(results, list) else 0
@@ -572,7 +576,7 @@ def prepare_search(results: list[dict[str, Any]]) -> PreparedSearch:
     tv_titles: set[str] = set()
 
     for result in results:
-        raw_title = result.get("title") if isinstance(result, dict) else None
+        raw_title = result.get("title")
         fallback_title = _clean_fallback_title(raw_title)
         try:
             parsed = parse_title(raw_title) if isinstance(raw_title, str) else {}
@@ -643,11 +647,12 @@ def resolve_title(
     have_tv = False
     detail_lookups = 0
     movie_years = set(lookup.movie_years)
-    for candidate in candidates:
+    for raw_candidate in cast("list[Any]", candidates):
         if detail_lookups >= 8:
             break
-        if not isinstance(candidate, dict):
+        if not isinstance(raw_candidate, dict):
             continue
+        candidate = cast("dict[str, Any]", raw_candidate)
         candidate_media_type = candidate.get("media_type")
         candidate_year = _candidate_year(candidate)
         want_default = not keys
