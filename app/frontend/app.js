@@ -1,9 +1,28 @@
 (function () {
+    function isTextEntry(el) {
+        if (!el) {
+            return false;
+        }
+        if (el.tagName === "TEXTAREA" || el.isContentEditable) {
+            return true;
+        }
+        if (el.tagName !== "INPUT") {
+            return false;
+        }
+        return ["button", "checkbox", "radio", "range", "submit", "reset", "file", "image", "color"].indexOf((el.type || "text").toLowerCase()) === -1;
+    }
+
     var keylistener = function (e) {
         var keycode = e.keyCode ? e.keyCode : e.which;
         var name = e.key || "";
         var lowername = name.toLowerCase();
         var direction = arrowDirection(e);
+        var typing = isTextEntry(document.activeElement);
+        // In a text field, Backspace edits and left/right move the caret; up and
+        // down still leave the field.
+        if (typing && (lowername === "backspace" || direction === "left" || direction === "right")) {
+            return;
+        }
         var isSelect = lowername === "enter" || lowername === "select" || keycode === 13 || keycode === 23;
         if (isSelect) {
             if (document.activeElement && document.activeElement.tagName === "INPUT") {
