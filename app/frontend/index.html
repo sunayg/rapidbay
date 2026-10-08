@@ -476,7 +476,7 @@
                            <span v-if="downloadStatusLabel" class="download-progress-tooltip">{{downloadStatusLabel}}</span>
                        </span>
                        <div class="buttons" v-if="supported">
-                           <chromecast-button v-if="url && isDesktop && isChrome" :video-url="url"/>
+                           <chromecast-button v-if="url && isDesktop && isChrome" :video-url="url" :media-title="decodeURIComponent(url.split('?')[0].split('/').pop())"/>
                            <caption-button v-if="url"/>
                            <favorite-button :magnet="magnet" :filename="filename"/>
                            <fullscreen-button/>
@@ -491,7 +491,7 @@
                            <span v-if="downloadStatusLabel" class="download-progress-tooltip">{{downloadStatusLabel}}</span>
                        </span>
                        <div class="buttons" v-if="supported">
-                           <chromecast-button v-if="url && isDesktop && isChrome" :video-url="url"/>
+                           <chromecast-button v-if="url && isDesktop && isChrome" :video-url="url" :media-title="displayTitle"/>
                            <favorite-button :magnet="magnet" :filename="filename"/>
                        </div>
                    </div>
@@ -596,7 +596,10 @@
         </script>
 
         <script type="text/x-template" id="chromecast-button-template">
-            <button class="btn btn-dark chromecast_button" @click="cast()"><div class="icon chromecast_icon"/></button>
+            <span class="cast-wrap">
+              <button class="btn btn-dark chromecast_button" @click="cast()" aria-label="Cast to TV"><div class="icon chromecast_icon"/></button>
+              <span class="cast-error" v-if="error">{{ error }}</span>
+            </span>
         </script>
 
         <script type="text/x-template" id="favorite-button-template">

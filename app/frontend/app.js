@@ -2267,42 +2267,104 @@
         },
     });
 
+    // One Chromecast session handle for the page. Each ChromecastJS polls for the
+    // cast SDK and registers its own player listeners, so it is made once and reused.
+    var chromecast = null;
+    function getChromecast() {
+        if (!chromecast && typeof ChromecastJS !== "undefined") {
+            chromecast = new ChromecastJS();
+        }
+        return chromecast;
+    }
+
     Vue.component("chromecast-button", {
         template: "#chromecast-button-template",
-        props: ["videoUrl"],
+        props: ["videoUrl", "mediaTitle"],
+        data: function () {
+            return { error: "" };
+        },
+        created: function () {
+            // Start the SDK handshake before the first click.
+            getChromecast();
+        },
+        destroyed: function () {
+            clearTimeout(this.errorTimer);
+        },
         methods: {
+            showError: function (message) {
+                var self = this;
+                this.error = message;
+                clearTimeout(this.errorTimer);
+                this.errorTimer = setTimeout(function () {
+                    self.error = "";
+                }, 6000);
+            },
             cast: function () {
-                var root = window.location.origin;
+                var self = this;
+                var cc = getChromecast();
                 var video = document.getElementsByTagName("video")[0];
-                var current_subtitle = null;
-                if (video.plyr) {
-                    if (current_subtitle && current_subtitle.active) {
-                        current_subtitle = video.plyr.captions.currentTrackNode;
-                    }
-                } else {
-                    var subtitle_tracks = Array.from(video.textTracks);
-                    current_subtitle = subtitle_tracks.find(function (t) {
-                        return t.mode !== "disabled" && t.mode !== "hidden";
-                    });
+                if (!cc || !video) {
+                    this.showError("Chromecast is not available in this browser.");
+                    return;
                 }
-                var current_subtitle_url = current_subtitle
-                    ? root + current_subtitle.id
-                    : null;
-                var contentUrl = this.videoUrl ? root + this.videoUrl : video.src;
-                var media = {
-                    content: contentUrl,
-                    title: "RapidBay",
-                    subtitles: current_subtitle
-                        ? [
-                              {
-                                  active: true,
-                                  src: current_subtitle_url,
-                              },
-                          ]
-                        : [],
-                };
-                var cc = new ChromecastJS();
-                cc.cast(media);
+                if (/^(localhost|127(\.\d+){3}|\[?::1\]?)$/.test(window.location.hostname)) {
+                    this.showError("Open RapidBay by its network address to cast. A TV cannot reach localhost.");
+                    return;
+                }
+                var parts = /^\/play\/([^/]+)\/(.*)$/.exec(this.videoUrl || "");
+                if (!parts) {
+                    this.showError("This video cannot be cast.");
+                    return;
+                }
+                if (!document.cookie) {
+                    document.cookie = localStorage.getItem("cookie");
+                }
+                // The TV cannot send the password, so it gets a signed link for this torrent.
+                $.ajax({
+                    url: "/api/cast_link/" + parts[1],
+                    method: "GET",
+                    success: function (link) {
+                        var prefix = window.location.origin + link.prefix;
+                        function castUrl(path) {
+                            var inner = /^\/play\/[^/]+\/(.*)$/.exec(path || "");
+                            return inner ? prefix + inner[1] : null;
+                        }
+                        var subtitles = [];
+                        Array.prototype.forEach.call(video.textTracks, function (track) {
+                            var src = castUrl(track.id);
+                            if (src) {
+                                subtitles.push({
+                                    active: track.mode === "showing",
+                                    src: src,
+                                    label: track.label,
+                                    srclang: track.language,
+                                });
+                            }
+                        });
+                        cc.cast(
+                            {
+                                content: castUrl(self.videoUrl),
+                                title: self.mediaTitle || "RapidBay",
+                                subtitles: subtitles,
+                                time: video.currentTime || 0,
+                                paused: false,
+                                poster: null,
+                                description: null,
+                            },
+                            function (problem) {
+                                if (problem) {
+                                    self.showError(String(problem));
+                                } else if (!video.paused) {
+                                    // The TV plays from here, so stop the local copy.
+                                    video.pause();
+                                }
+                            }
+                        );
+                    },
+                    error: function () {
+                        self.showError("Could not prepare a cast link.");
+                    },
+                });
             },
         },
     });
