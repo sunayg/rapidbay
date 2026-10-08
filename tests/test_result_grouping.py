@@ -6,6 +6,7 @@ from app.result_grouping import (
     PreparedSearch,
     SearchAssembler,
     TitleLookup,
+    details_for_match,
     enrich_search_results,
     prepare_search,
     resolve_title,
@@ -415,12 +416,12 @@ def test_title_without_tmdb_match_is_returned_in_other() -> None:
     assert response == {"groups": [], "other": [{**result, "parsed_title": "Unknown Series"}]}
 
 
-def test_movie_match_falls_back_to_tv_details() -> None:
+def test_movie_match_does_not_fall_back_to_tv_details() -> None:
     result = make_torrent("A Show|1|2")
     client = MagicMock()
     client.search_multi.return_value = {"results": [{"id": 123, "media_type": "movie"}]}
     client.get_movie_details.return_value = None
-    client.get_tv_details.return_value = {"id": 123, "name": "A Show"}
+    client.get_tv_details.return_value = {"id": 123, "name": "Unrelated Show"}
 
     with (
         patch("app.result_grouping.parse_title", side_effect=lambda title: parsed_title(title)),
@@ -429,9 +430,8 @@ def test_movie_match_falls_back_to_tv_details() -> None:
         response = enrich_search_results([result], "api-key")
 
     client.get_movie_details.assert_called_once_with(123)
-    client.get_tv_details.assert_called_once_with(123)
-    assert response["groups"][0]["media_type"] == "tv"
-    assert response["groups"][0]["seasons"][0]["episodes"] == [result]
+    client.get_tv_details.assert_not_called()
+    assert all(group.get("title") != "Unrelated Show" for group in response["groups"])
 
 
 def test_tmdb_lookups_are_capped_at_thirty_distinct_titles() -> None:
@@ -449,12 +449,12 @@ def test_tmdb_lookups_are_capped_at_thirty_distinct_titles() -> None:
     assert len(response["other"]) == MAX_TMDB_LOOKUPS + 1
 
 
-def test_tv_match_falls_back_to_movie_details() -> None:
+def test_tv_match_does_not_fall_back_to_movie_details() -> None:
     result = make_torrent("A Movie|")
     client = MagicMock()
     client.search_multi.return_value = {"results": [{"id": 321, "media_type": "tv"}]}
-    client.get_tv_details.return_value = None
-    client.get_movie_details.return_value = {"id": 321, "title": "A Movie"}
+    client.get_tv_details.side_effect = RuntimeError("TMDB timed out")
+    client.get_movie_details.return_value = {"id": 321, "title": "Unrelated Movie"}
 
     with (
         patch("app.result_grouping.parse_title", side_effect=lambda title: parsed_title(title)),
@@ -463,11 +463,8 @@ def test_tv_match_falls_back_to_movie_details() -> None:
         response = enrich_search_results([result], "api-key")
 
     client.get_tv_details.assert_called_once_with(321)
-    client.get_movie_details.assert_called_once_with(321)
-    group = response["groups"][0]
-    assert group["media_type"] == "movie"
-    assert group["seasons"] == []
-    assert group["results"] == [result]
+    client.get_movie_details.assert_not_called()
+    assert all(group.get("title") != "Unrelated Movie" for group in response["groups"])
 
 
 def test_tv_result_without_season_goes_to_other_instead_of_a_fake_bucket() -> None:
@@ -973,3 +970,23 @@ def test_enrichment_stops_when_tmdb_is_unavailable() -> None:
 
     resolve.assert_not_called()
     assert len(response["other"]) == 2
+
+
+def test_details_for_match_does_not_fall_back_to_the_other_media_type() -> None:
+    client = MagicMock()
+    client.get_tv_details.side_effect = RuntimeError("TMDB timed out")
+    client.get_movie_details.return_value = {"id": 1399, "title": "An Unrelated Movie"}
+
+    assert details_for_match(client, {"id": 1399, "media_type": "tv"}) is None
+    client.get_movie_details.assert_not_called()
+
+
+def test_details_for_match_uses_the_reported_media_type() -> None:
+    client = MagicMock()
+    client.get_movie_details.return_value = {"id": 1399, "title": "Some Movie"}
+
+    assert details_for_match(client, {"id": 1399, "media_type": "movie"}) == (
+        "movie",
+        {"id": 1399, "title": "Some Movie"},
+    )
+    client.get_tv_details.assert_not_called()

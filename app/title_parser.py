@@ -24,7 +24,7 @@ _SEASON_WORD_RANGE = re.compile(
 )
 _SEASON_CODE_RANGE = re.compile(
     r"(?<![A-Za-z0-9])S(\d{1,2})(?:[ ._-]*E\d{1,2})?\s*(?:to|thru|through|[-–—~])\s*"
-    r"S(\d{1,2})(?:[ ._-]*E\d{1,2})?",
+    + r"S(\d{1,2})(?:[ ._-]*E\d{1,2})?",
     re.IGNORECASE,
 )
 _SINGLE_SEASON_CODE = re.compile(
@@ -39,19 +39,19 @@ _EPISODE_CODE = re.compile(
 _EPISODE_WORD = re.compile(r"\bepisode\s+\d{1,2}\b", re.IGNORECASE)
 _RELEASE_MARKERS = re.compile(
     r"(?:"
-    r"\bseasons?\s+\d{1,2}\s*(?:to|thru|through|[-–—~])\s*(?:season\s+)?\d{1,2}\b"
-    r"|"
-    r"(?<![A-Za-z0-9])S\d{1,2}(?:[ ._-]*E\d{1,2})?\s*(?:to|thru|through|[-–—~])\s*"
-    r"S\d{1,2}(?:[ ._-]*E\d{1,2})?"
-    r"|"
-    r"(?<![A-Za-z0-9])S\d{1,2}(?:[ ._-]*E\d{1,2})?(?![A-Za-z0-9])"
-    r"|"
-    r"\bseasons?\s+\d{1,2}\b"
-    r"|"
-    r"\bcomplete\b"
-    r"|"
-    r"\b(?:mp4|mkv|avi|m4v|wmv|mov|mpg|mpeg)\b"
-    r")",
+    + r"\bseasons?\s+\d{1,2}\s*(?:to|thru|through|[-–—~])\s*(?:season\s+)?\d{1,2}\b"
+    + r"|"
+    + r"(?<![A-Za-z0-9])S\d{1,2}(?:[ ._-]*E\d{1,2})?\s*(?:to|thru|through|[-–—~])\s*"
+    + r"S\d{1,2}(?:[ ._-]*E\d{1,2})?"
+    + r"|"
+    + r"(?<![A-Za-z0-9])S\d{1,2}(?:[ ._-]*E\d{1,2})?(?![A-Za-z0-9])"
+    + r"|"
+    + r"\bseasons?\s+\d{1,2}\b"
+    + r"|"
+    + r"\bcomplete\b"
+    + r"|"
+    + r"\b(?:mp4|mkv|avi|m4v|wmv|mov|mpg|mpeg)\b"
+    + r")",
     re.IGNORECASE,
 )
 _MAX_SEASON_SPAN = 30
