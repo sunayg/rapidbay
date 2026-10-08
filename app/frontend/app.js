@@ -940,6 +940,11 @@
         return null;
     }
 
+    // Navigo decodes route params once, so a single encode round-trips any term
+    function searchPath(term) {
+        return "/search/" + encodeURIComponent(term);
+    }
+
     function navigate(path, replaceState) {
         if (replaceState) {
             router.historyAPIUpdateMethod("replaceState");
@@ -2577,7 +2582,7 @@
                 }
                 this.searchterm = term;
                 saveSearchTerm(term);
-                var path = "/search/" + term;
+                var path = searchPath(term);
                 if (title.tmdb_id && (title.media_type === "tv" || title.media_type === "movie")) {
                     path += "?media=" + title.media_type + "&tmdb=" + title.tmdb_id;
                 }
@@ -2594,13 +2599,13 @@
                     );
                 } else {
                     saveSearchTerm(this.searchterm);
-                    navigate("/search/" + this.searchterm);
+                    navigate(searchPath(this.searchterm));
                 }
             },
             onHistoryClick: function (term) {
                 this.searchterm = term;
                 saveSearchTerm(term);
-                navigate("/search/" + term);
+                navigate(searchPath(term));
             },
             clearSearches: function () {
                 clearSearchHistory();
@@ -2831,7 +2836,7 @@
                     return;
                 }
                 saveSearchTerm(term);
-                navigate("/search/" + term);
+                navigate(searchPath(term));
             },
             onResultClick: function (result, seasonNumber, episodeNumber) {
                 rememberEpisodeTarget(seasonNumber, episodeNumber);
