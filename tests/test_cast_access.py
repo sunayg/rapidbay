@@ -79,7 +79,8 @@ def test_cast_link_refuses_other_torrents_and_bad_tokens(client: TestClient) -> 
     token = prefix.split("/")[2]
 
     assert client.get(f"/cast/{token}/{'b' * 40}/movie.mp4").status_code == 404
-    assert client.get(f"/cast/{token[:-1]}0/{HASH}/movie.mp4").status_code == 404
+    altered = token[:-1] + ("1" if token[-1] == "0" else "0")
+    assert client.get(f"/cast/{altered}/{HASH}/movie.mp4").status_code == 404
     assert client.get(f"{prefix}missing.mp4").status_code == 404
 
 
