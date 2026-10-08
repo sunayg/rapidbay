@@ -6,7 +6,7 @@ from app.result_grouping import (
     PreparedSearch,
     SearchAssembler,
     TitleLookup,
-    _details_for_match,
+    details_for_match,
     enrich_search_results,
     prepare_search,
     resolve_title,
@@ -977,7 +977,7 @@ def test_details_for_match_does_not_fall_back_to_the_other_media_type() -> None:
     client.get_tv_details.side_effect = RuntimeError("TMDB timed out")
     client.get_movie_details.return_value = {"id": 1399, "title": "An Unrelated Movie"}
 
-    assert _details_for_match(client, {"id": 1399, "media_type": "tv"}) is None
+    assert details_for_match(client, {"id": 1399, "media_type": "tv"}) is None
     client.get_movie_details.assert_not_called()
 
 
@@ -985,7 +985,7 @@ def test_details_for_match_uses_the_reported_media_type() -> None:
     client = MagicMock()
     client.get_movie_details.return_value = {"id": 1399, "title": "Some Movie"}
 
-    assert _details_for_match(client, {"id": 1399, "media_type": "movie"}) == (
+    assert details_for_match(client, {"id": 1399, "media_type": "movie"}) == (
         "movie",
         {"id": 1399, "title": "Some Movie"},
     )

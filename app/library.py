@@ -14,11 +14,11 @@ import log
 import settings
 import stats
 from result_grouping import (
-    _card_details,
-    _details_for_match,
-    _parsed_seasons,
-    _year_from_details,
+    card_details,
+    details_for_match,
     enrich_search_results,
+    parsed_seasons,
+    year_from_details,
 )
 from title_parser import parse_title
 from tmdb import TMDBClient, failure_count
@@ -128,7 +128,7 @@ def _identity_key(parsed: dict[str, Any]) -> str:
     title = parsed.get("title")
     name = title.strip().casefold() if isinstance(title, str) else ""
     year = parsed.get("year") or ""
-    kind = "tv" if _parsed_seasons(parsed) else "movie"
+    kind = "tv" if parsed_seasons(parsed) else "movie"
     return f"{kind}:{name}:{year}"
 
 
@@ -142,7 +142,7 @@ def _choose_parse(event: dict[str, Any]) -> tuple[str, dict[str, Any], dict[str,
         raw, identity = filename, from_file
     else:
         raw, identity = title, from_title
-    episode = from_file if _parsed_seasons(from_file) else identity
+    episode = from_file if parsed_seasons(from_file) else identity
     return raw, identity, episode
 
 
@@ -179,7 +179,7 @@ def _resolve_identity_direct(raw_title: str) -> dict[str, Any] | None:
     for candidate in _dict_items(candidates):
         if candidate.get("media_type") not in ("tv", "movie"):
             continue
-        resolved = _details_for_match(client, candidate)
+        resolved = details_for_match(client, candidate)
         if resolved is None:
             continue
         media_type, details = resolved
@@ -195,12 +195,12 @@ def _resolve_identity_direct(raw_title: str) -> dict[str, Any] | None:
                 poster_url = client.get_image_url(poster_path, size="w185")
             except Exception:
                 poster_url = None
-        card = _card_details(client, details)
+        card = card_details(client, details)
         return {
             "tmdb_id": tmdb_id,
             "media_type": media_type,
             "title": title if isinstance(title, str) and title.strip() else query,
-            "year": _year_from_details(details, media_type),
+            "year": year_from_details(details, media_type),
             "poster_url": poster_url,
             "backdrop_url": card.get("backdrop_url"),
             "adult": details.get("adult") is True or details.get("softcore") is True,
@@ -320,7 +320,7 @@ def _apply_personal(item: dict[str, Any], event: dict[str, Any], episode_parsed:
         if item["media_type"] == "movie":
             item["watched_at"] = max(int(item.get("watched_at") or 0), when)
         else:
-            seasons = _parsed_seasons(episode_parsed)
+            seasons = parsed_seasons(episode_parsed)
             episode_number = _as_int(episode_parsed.get("episode"))
             if len(seasons) == 1 and episode_number is not None:
                 _touch_episode(item, seasons[0], episode_number, label_text, when)
@@ -384,7 +384,7 @@ def _record_activity(
         elif kind == "watched" and identity.get("media_type") == "movie":
             dedupe = f"watched:{identity.get('media_type')}:{identity.get('tmdb_id')}"
         elif kind == "watched":
-            seasons = _parsed_seasons(episode_parsed)
+            seasons = parsed_seasons(episode_parsed)
             episode_number = _as_int(episode_parsed.get("episode"))
             if len(seasons) != 1 or episode_number is None:
                 return
@@ -454,7 +454,7 @@ def _progress_superseded(item: dict[str, Any], entry: dict[str, Any]) -> bool:
 def _progress_matches(entry: dict[str, Any], episode_parsed: dict[str, Any], filename: str, media_type: str) -> bool:
     if media_type == "movie":
         return True
-    seasons = _parsed_seasons(episode_parsed)
+    seasons = parsed_seasons(episode_parsed)
     episode_number = _as_int(episode_parsed.get("episode"))
     if (
         len(seasons) == 1
@@ -489,7 +489,7 @@ def _touch_progress(
     if position <= 120 or _counts_as_finished(position, duration):
         _drop_progress(item, episode_parsed, filename)
         return
-    seasons = _parsed_seasons(episode_parsed)
+    seasons = parsed_seasons(episode_parsed)
     episode_number = _as_int(episode_parsed.get("episode"))
     magnet = _text(event.get("magnet"))
     entry: dict[str, Any] = {
