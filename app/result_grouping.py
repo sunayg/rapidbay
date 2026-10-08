@@ -98,14 +98,12 @@ def _details_for_match(
     if media_type not in ("tv", "movie") or tmdb_id is None:
         return None
 
-    first_type, second_type = ("tv", "movie") if media_type == "tv" else ("movie", "tv")
-    for candidate_type in (first_type, second_type):
-        try:
-            details = client.get_tv_details(tmdb_id) if candidate_type == "tv" else client.get_movie_details(tmdb_id)
-        except Exception:
-            details = None
-        if isinstance(details, dict) and details:
-            return candidate_type, details
+    try:
+        details = client.get_tv_details(tmdb_id) if media_type == "tv" else client.get_movie_details(tmdb_id)
+    except Exception:
+        return None
+    if isinstance(details, dict) and details:
+        return media_type, details
     return None
 
 
