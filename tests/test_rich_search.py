@@ -24,6 +24,7 @@ def _episode(title: str, seeds: int = 5) -> dict[str, Any]:
     return {
         "title": title,
         "seeds": seeds,
+        "size": None,
         "magnet": "magnet:?xt=urn:btih:abc",
         "torrent_link": None,
         "status": "downloading",

@@ -2982,6 +2982,19 @@
                 }
                 return [];
             },
+            formatSize: function (bytes) {
+                var value = Number(bytes);
+                if (!(value > 0)) {
+                    return "";
+                }
+                var units = ["B", "KB", "MB", "GB", "TB"];
+                var unit = 0;
+                while (value >= 1024 && unit < units.length - 1) {
+                    value /= 1024;
+                    unit += 1;
+                }
+                return (unit >= 3 ? value.toFixed(2) : unit >= 1 ? value.toFixed(0) : value) + " " + units[unit];
+            },
             formatRuntime: function (minutes) {
                 var total = parseInt(minutes, 10);
                 if (!total || total < 1) {
@@ -3700,7 +3713,7 @@
                 this.results = getFavorites();
                 fetchAndApplyStatus(this.results);
                 this.focusFirstResult();
-            } else if ((this.richContentEnabled || this.pinnedTitle) && this.searchterm) {
+            } else if (this.richContentEnabled || this.pinnedTitle) {
                 this.loadRichSearch();
             } else {
                 this.startFlatSearch();

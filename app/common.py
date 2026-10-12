@@ -36,6 +36,17 @@ def _get_trending_title_blocklist_re() -> Pattern[str] | None:
     return _blocklist_re
 
 
+def size_bytes(value: Any) -> int | None:
+    """Indexer-reported size in bytes, or None when missing or not a positive number."""
+    if isinstance(value, bool):
+        return None
+    try:
+        size = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return size if size > 0 else None
+
+
 def should_drop_from_trending(title: str | None, categories: Iterable[int] | None) -> bool:
     """Filter applied only to the empty-search trending feed.
 

@@ -8,7 +8,7 @@ import log
 import requests
 import settings
 import torrent
-from common import memoize, should_drop_from_trending
+from common import memoize, should_drop_from_trending, size_bytes
 from dateutil.parser import parse
 
 API_PATH = f"{settings.JACKETT_HOST}/api/v2.0"
@@ -107,6 +107,7 @@ def _parse_results(
             magnet_links.append(
                 {
                     "seeds": result.get("Seeders", 0),
+                    "size": size_bytes(result.get("Size")),
                     "title": result["Title"],
                     "magnet": result.get("MagnetUri"),
                     "torrent_link": result.get("Link"),

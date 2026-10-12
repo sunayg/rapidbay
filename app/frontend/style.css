@@ -1689,7 +1689,8 @@ video::cue {
     color: #fff;
 }
 
-.result-seeds {
+.result-seeds,
+.result-size {
     float: right;
     margin-left: 12px;
     color: rgba(255, 255, 255, 0.48);

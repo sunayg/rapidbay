@@ -990,3 +990,24 @@ def test_details_for_match_uses_the_reported_media_type() -> None:
         {"id": 1399, "title": "Some Movie"},
     )
     client.get_tv_details.assert_not_called()
+
+
+def test_indexer_size_survives_grouping_and_unmatched_results() -> None:
+    matched = {**make_torrent("Dune|||2021"), "size": 4_200_000_000}
+    unmatched = {**make_torrent("Mystery Clip|", seeds=2), "size": 1_000_000}
+    client = MagicMock()
+    client.search_multi.side_effect = lambda query, *args, **kwargs: (
+        {"results": [{"id": 438631, "media_type": "movie", "title": "Dune", "release_date": "2021-09-15"}]}
+        if "Dune" in query
+        else {"results": []}
+    )
+    client.get_movie_details.return_value = {"id": 438631, "title": "Dune", "release_date": "2021-09-15"}
+
+    with (
+        patch("app.result_grouping.parse_title", side_effect=lambda title: parsed_title(title)),
+        patch("app.result_grouping.TMDBClient", return_value=client),
+    ):
+        response = enrich_search_results([matched, unmatched], "api-key")
+
+    assert response["groups"][0]["results"][0]["size"] == 4_200_000_000
+    assert response["other"][0]["size"] == 1_000_000

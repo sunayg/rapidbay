@@ -310,7 +310,7 @@
                                           <table v-if="isLatestOpen(group) && latestEpisodeResults(group).length" class="table table-hover latest-variations">
                                               <tbody>
                                                   <tr v-for="row in latestEpisodeRows(group)" :key="row.key" tabindex="0" @click.stop="onEpisodeRowClick(group, {season: group.latest_episode.season_number}, {episode: group.latest_episode.episode_number, key: String(group.latest_episode.episode_number)}, row)">
-                                                      <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span></template></td>
+                                                      <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span><span v-if="row.result.size" class="result-size">{{ formatSize(row.result.size) }}</span></template></td>
                                                   </tr>
                                               </tbody>
                                           </table>
@@ -351,7 +351,7 @@
                                               <table v-if="isEpisodeOpen(group, season, episode)" class="table table-hover episode-variations">
                                                   <tbody>
                                                       <tr v-for="row in episodeResultRows(group, season, episode)" :key="row.key" tabindex="0" @click.stop="onEpisodeRowClick(group, season, episode, row)">
-                                                          <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span></template></td>
+                                                          <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span><span v-if="row.result.size" class="result-size">{{ formatSize(row.result.size) }}</span></template></td>
                                                       </tr>
                                                   </tbody>
                                               </table>
@@ -363,7 +363,7 @@
                                       <table class="table table-hover group-table">
                                           <tbody>
                                               <tr v-for="row in movieResultRows(group)" :key="row.key" tabindex="0" @click="onMovieRowClick(group, row)">
-                                                  <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span></template></td>
+                                                  <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span><span v-if="row.result.size" class="result-size">{{ formatSize(row.result.size) }}</span></template></td>
                                               </tr>
                                           </tbody>
                                       </table>
@@ -376,7 +376,7 @@
                           <table class="table table-hover other-results-table">
                               <tbody>
                                   <tr v-for="result in other" :key="result.magnet || result.torrent_link || result.title" tabindex="0" @click="onResultClick(result)">
-                                      <td :title="result.seeds ? (result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')) : ''"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ result.title }}<span v-if="result.seeds" class="result-seeds">{{ result.seeds }} seeds</span></td>
+                                      <td :title="result.seeds ? (result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')) : ''"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ result.title }}<span v-if="result.seeds" class="result-seeds">{{ result.seeds }} seeds</span><span v-if="result.size" class="result-size">{{ formatSize(result.size) }}</span></td>
                                   </tr>
                               </tbody>
                           </table>
@@ -392,7 +392,7 @@
                               v-for="result in flatResults"
                               @click="onResultClick(result)"
                               >
-                                  <td :title="result.seeds ? (result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')) : ''"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ result.title }}<span v-if="richContentEnabled && result.seeds" class="result-seeds">{{ result.seeds }} seeds</span></td>
+                                  <td :title="result.seeds ? (result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')) : ''"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ result.title }}<span v-if="richContentEnabled && result.seeds" class="result-seeds">{{ result.seeds }} seeds</span><span v-if="richContentEnabled && result.size" class="result-size">{{ formatSize(result.size) }}</span></td>
                               </tr>
                           </tbody>
                       </table>

@@ -8,7 +8,7 @@ import log
 import requests
 import settings
 import torrent
-from common import memoize, should_drop_from_trending
+from common import memoize, should_drop_from_trending, size_bytes
 from dateutil.parser import parse
 
 API_PATH = f"{settings.PROWLARR_HOST}/api/v1"
@@ -155,6 +155,7 @@ def _parse_results(
         magnet_links.append(
             {
                 "seeds": result.get("seeders", 0) or 0,
+                "size": size_bytes(result.get("size")),
                 "title": title,
                 "magnet": magnet_uri,
                 "torrent_link": torrent_link,
