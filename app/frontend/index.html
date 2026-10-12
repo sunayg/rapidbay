@@ -309,8 +309,8 @@
                                           </div>
                                           <table v-if="isLatestOpen(group) && latestEpisodeResults(group).length" class="table table-hover latest-variations">
                                               <tbody>
-                                                  <tr v-for="row in latestEpisodeRows(group)" :key="row.key" tabindex="0" @click.stop="onEpisodeRowClick(group, {season: group.latest_episode.season_number}, {episode: group.latest_episode.episode_number, key: String(group.latest_episode.episode_number)}, row)">
-                                                      <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span><span v-if="row.result.size" class="result-size">{{ formatSize(row.result.size) }}</span></template></td>
+                                                  <tr v-for="row in latestEpisodeRows(group)" :key="row.key" :tabindex="row.type === 'heading' ? null : 0" :class="{ 'resolution-heading': row.type === 'heading' }" @click.stop="onEpisodeRowClick(group, {season: group.latest_episode.season_number}, {episode: group.latest_episode.episode_number, key: String(group.latest_episode.episode_number)}, row)">
+                                                      <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more' || row.type === 'heading'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span><span v-if="row.result.size" class="result-size">{{ formatSize(row.result.size) }}</span></template></td>
                                                   </tr>
                                               </tbody>
                                           </table>
@@ -322,6 +322,9 @@
                                               :tabindex="group.seasons.length > 1 ? 0 : null"
                                               @click="toggleSeason(group, season)"
                                           >Season {{ season.season }}</h3>
+                                          <div v-if="resolutionSummary(season.episodes).length" class="season-resolutions">
+                                              <span v-for="res in resolutionSummary(season.episodes)" :key="res.rank" class="resolution-chip">{{ res.name }} <b>{{ res.count }}</b></span>
+                                          </div>
                                           <div v-if="isSeasonOpen(group, season)" class="episode-list">
                                           <div v-if="isSeasonLoading(group, season)" class="episode-loading">Loading episodes</div>
                                           <div v-else v-for="episode in seasonEpisodes(group, season)" :key="episode.key" class="episode-block">
@@ -350,8 +353,8 @@
                                               </div>
                                               <table v-if="isEpisodeOpen(group, season, episode)" class="table table-hover episode-variations">
                                                   <tbody>
-                                                      <tr v-for="row in episodeResultRows(group, season, episode)" :key="row.key" tabindex="0" @click.stop="onEpisodeRowClick(group, season, episode, row)">
-                                                          <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span><span v-if="row.result.size" class="result-size">{{ formatSize(row.result.size) }}</span></template></td>
+                                                      <tr v-for="row in episodeResultRows(group, season, episode)" :key="row.key" :tabindex="row.type === 'heading' ? null : 0" :class="{ 'resolution-heading': row.type === 'heading' }" @click.stop="onEpisodeRowClick(group, season, episode, row)">
+                                                          <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more' || row.type === 'heading'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span><span v-if="row.result.size" class="result-size">{{ formatSize(row.result.size) }}</span></template></td>
                                                       </tr>
                                                   </tbody>
                                               </table>
@@ -362,8 +365,8 @@
                                   <div v-else-if="isGroupOpen(group)">
                                       <table class="table table-hover group-table">
                                           <tbody>
-                                              <tr v-for="row in movieResultRows(group)" :key="row.key" tabindex="0" @click="onMovieRowClick(group, row)">
-                                                  <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span><span v-if="row.result.size" class="result-size">{{ formatSize(row.result.size) }}</span></template></td>
+                                              <tr v-for="row in movieResultRows(group)" :key="row.key" :tabindex="row.type === 'heading' ? null : 0" :class="{ 'resolution-heading': row.type === 'heading' }" @click="onMovieRowClick(group, row)">
+                                                  <td :class="row.type === 'more' ? 'more-results' : ''" :title="row.result ? row.result.title : ''"><template v-if="row.type === 'more' || row.type === 'heading'">{{ row.label }}</template><template v-else><span v-if="row.result.status === 'downloaded'">&#x25CF; </span><span v-else-if="row.result.status === 'downloading'">&#x25CB; </span>{{ row.label }}<span v-if="row.result.seeds" class="result-seeds">{{ row.result.seeds }} seeds</span><span v-if="row.result.size" class="result-size">{{ formatSize(row.result.size) }}</span></template></td>
                                               </tr>
                                           </tbody>
                                       </table>

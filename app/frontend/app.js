@@ -3050,6 +3050,14 @@
                 });
                 var rows = [];
                 buckets.forEach(function (bucket) {
+                    if (buckets.length > 1) {
+                        rows.push({
+                            type: "heading",
+                            key: "heading:" + bucket.rank,
+                            rank: bucket.rank,
+                            label: bucket.name + " (" + bucket.results.length + ")",
+                        });
+                    }
                     var hidden = collapse && bucket.results.length > 4 && !isRankOpen(bucket.rank);
                     var visible = hidden ? bucket.results.slice(0, 3) : bucket.results;
                     visible.forEach(function (item, index) {
@@ -3071,6 +3079,18 @@
                     }
                 });
                 return rows;
+            },
+            resolutionSummary: function (results) {
+                var counts = {};
+                (results || []).forEach(function (result) {
+                    var rank = labelWithResolution(result.title || "").rank;
+                    counts[rank] = (counts[rank] || 0) + 1;
+                });
+                return Object.keys(counts).map(Number).sort(function (a, b) {
+                    return b - a;
+                }).map(function (rank) {
+                    return { rank: rank, name: resolutionLabelForRank(rank) || "Other", count: counts[rank] };
+                });
             },
             resolutionOpenKey: function (group, rank) {
                 return [group.tmdb_id || group.title, group.year || "", rank].join(":");
@@ -3118,6 +3138,9 @@
                 );
             },
             onEpisodeRowClick: function (group, season, episode, row) {
+                if (row.type === "heading") {
+                    return;
+                }
                 if (row.type === "more") {
                     this.$set(this.openResolutions, this.episodeResolutionOpenKey(group, season, episode, row.rank), true);
                     return;
@@ -3131,6 +3154,9 @@
                 this.onResultClick(row.result, seasonNumber, episodeNumber);
             },
             onMovieRowClick: function (group, row) {
+                if (row.type === "heading") {
+                    return;
+                }
                 if (row.type === "more") {
                     this.showResolution(group, row.rank);
                     return;
