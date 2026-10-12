@@ -3647,6 +3647,14 @@
             },
         },
         template: "#search-results-screen-template",
+        computed: {
+            // Rich search keeps its ungrouped hits in `other` and parks `results`
+            // as an empty list; history, favorites, trending and classic search
+            // fill `results` and leave `other` empty.
+            flatResults: function () {
+                return this.results && this.results.length ? this.results : this.other;
+            },
+        },
         created: function () {
             var self = this;
             this.searchterm = this.params ? this.params.searchterm : "";
