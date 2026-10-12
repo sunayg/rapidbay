@@ -1427,6 +1427,15 @@
                 video.muted = video.volume === 0;
                 this.syncPlayback();
             },
+            closeMenu: function () {
+                var name = this.openMenu;
+                this.openMenu = "";
+                var label = name === "episodes" ? "Episodes" : "Audio and subtitles";
+                var opener = this.$el && this.$el.querySelector('[aria-label="' + label + '"]');
+                if (opener && opener.focus) {
+                    opener.focus();
+                }
+            },
             toggleMenu: function (name) {
                 this.hovering = true;
                 this.openMenu = this.openMenu === name ? "" : name;
@@ -2141,38 +2150,85 @@
             this.refreshTracks();
 
             this.videokeylistener = function (event) {
-                const videoSelected =
-                    ["video", "body"].indexOf(
-                        document.activeElement &&
-                            document.activeElement.tagName.toLowerCase()
-                    ) !== -1;
-                if (event.key.toLowerCase() === "arrowright" && videoSelected) {
+                var key = String(event.key || "");
+                var lowerkey = key.toLowerCase();
+                var code = event.keyCode || event.which || 0;
+                var direction = arrowDirection(event);
+                var active = document.activeElement;
+                var videoSelected =
+                    ["video", "body"].indexOf(active && active.tagName.toLowerCase()) !== -1;
+                function handled() {
                     event.preventDefault();
                     event.stopPropagation();
-                    video.currentTime += 60;
-                } else if (
-                    event.key.toLowerCase() === "arrowleft" &&
-                    videoSelected
-                ) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    video.currentTime -= 15;
-                } else if (
-                    event.key.toLowerCase() === "enter" &&
-                    videoSelected
-                ) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (!video.paused) {
-                        video.pause();
-                    } else {
-                        video.play();
+                    // The capture handler stops the keydown reaching the control
+                    // reveal listener, so show the controls here as feedback.
+                    if (self.mousemove_listener) {
+                        self.mousemove_listener();
                     }
-                } else if (
-                    event.key.toLowerCase() === "mediarewind" &&
-                    videoSelected
-                ) {
+                }
+                function playPause(wanted) {
+                    if (wanted === "play" || (wanted !== "pause" && video.paused)) {
+                        video.play().catch(function () {});
+                    } else {
+                        video.pause();
+                    }
+                }
+                // Remote and keyboard media keys work wherever focus is.
+                if (lowerkey === "mediaplaypause" || code === 179) {
+                    handled();
+                    playPause();
+                    return;
+                }
+                if (lowerkey === "mediaplay" || code === 126) {
+                    handled();
+                    playPause("play");
+                    return;
+                }
+                if (lowerkey === "mediapause" || code === 127) {
+                    handled();
+                    playPause("pause");
+                    return;
+                }
+                if (lowerkey === "mediafastforward" || code === 417) {
+                    handled();
+                    self.seekBy(30);
+                    return;
+                }
+                if ((lowerkey === "mediatracknext" || code === 176) && self.nextFilename) {
+                    handled();
+                    self.playNext();
+                    return;
+                }
+                if ((lowerkey === "escape" || lowerkey === "goback" || lowerkey === "browserback" || code === 4) && self.openMenu) {
+                    handled();
+                    self.closeMenu();
+                    return;
+                }
+                if (lowerkey === "mediarewind" && videoSelected) {
                     location.href = document.querySelector("video").src;
+                    return;
+                }
+                if (!videoSelected) {
+                    return;
+                }
+                if (direction === "right") {
+                    handled();
+                    video.currentTime += 60;
+                } else if (direction === "left") {
+                    handled();
+                    video.currentTime -= 15;
+                } else if (lowerkey === "enter" || code === 13 || code === 23) {
+                    handled();
+                    playPause();
+                } else if (lowerkey === " " || lowerkey === "spacebar" || lowerkey === "k") {
+                    handled();
+                    playPause();
+                } else if (lowerkey === "m") {
+                    handled();
+                    self.toggleMute();
+                } else if (lowerkey === "f") {
+                    handled();
+                    self.toggleFullscreen();
                 }
             };
 
