@@ -4,7 +4,7 @@
         <meta charset="utf-8" />
         <meta
             name="viewport"
-            content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+            content="width=device-width, initial-scale=1.0"
         />
         <script>
             (function () {
@@ -16,7 +16,6 @@
             })();
         </script>
         <title>RapidBay</title>
-        <script src="https://cdn.polyfill.io/v3/polyfill.min.js"></script>
         <script src="/lib/jquery-3.3.1.min.js"></script>
         <script src="/lib/jquery-ui-focusable-1.13.2.min.js"></script>
         <script src="/lib/vue.2.5.3.min.js"></script>
@@ -26,7 +25,7 @@
         <script src="/lib/chromecastjs.js"></script>
         <link href="/lib/bootstrap.cyborg.min.css" rel="stylesheet" />
         <link rel="manifest" href="/manifest.json" />
-        <link href="/style.css?v=20261002-classic-gap2" rel="stylesheet" />
+        <link href="/style.css?v=20261012-ui-review" rel="stylesheet" />
         <link rel="icon" type="image/png" href="/favicon.png?v=3" />
     </head>
 
@@ -74,31 +73,31 @@
             <div class="root" :class="richContentEnabled ? 'home-root' : 'classic-root'">
               <template v-if="!richContentEnabled">
                 <div class="topbar topbar-classic">
-                  <button tabindex="0" @click="goHistory()" class="btn btn-dark backarrow">
+                  <button tabindex="0" @click="goHistory()" class="btn btn-dark backarrow" aria-label="History" title="History">
                     <div class="icon history_icon"/>
                   </button>
                   <div>
-                    <button tabindex="0" @click="goTrending()" class="btn btn-dark">
+                    <button tabindex="0" @click="goTrending()" class="btn btn-dark" aria-label="Community searches" title="Community searches">
                       <div class="icon trending_icon"/>
                     </button>
                   </div>
                   <div class="buttons">
-                    <button tabindex="0" @click="goFavorites()" class="btn btn-dark">
+                    <button tabindex="0" @click="goFavorites()" class="btn btn-dark" aria-label="Favorites" title="Favorites">
                       <div class="icon favorites_icon"/>
                     </button>
                   </div>
                 </div>
                 <div class="wrapper">
-                    <label class="rich-toggle-label classic-rich-toggle">
-                      <input type="checkbox" v-model="richContentEnabled" @change="onRichToggle" class="rich-toggle-input">
-                      <span class="rich-toggle-text">View with rich media content</span>
-                    </label>
+                    <button type="button" role="switch" class="rich-switch classic-rich-toggle" :aria-checked="richContentEnabled ? 'true' : 'false'" @click="setRichContent(!richContentEnabled)">
+                      <span class="rich-switch-track" aria-hidden="true"><span class="rich-switch-thumb"></span></span>
+                      <span class="rich-switch-text">View with rich media content</span>
+                    </button>
                   <div class="classic-search">
                     <form @submit="onSubmit">
                       <div class="input-group">
                         <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none">
                         <div class="input-group-append">
-                          <button class="btn btn-light" type="submit" tabindex="-1"><div class="icon search_icon"/></button>
+                          <button class="btn btn-light" type="submit" tabindex="-1" aria-label="Search"><div class="icon search_icon"/></button>
                         </div>
                       </div>
                     </form>
@@ -120,6 +119,7 @@
               </div>
               <div class="home-stage">
               <div class="home-rows">
+                <p v-if="homeLoaded && !keepWatching.length && !recentTitles.length && !topSeries.length && !topMovies.length && !searchHistory.length" class="empty-state home-empty">Search for a movie or show to get started.</p>
                 <section v-if="keepWatching.length" class="home-row">
                   <h2 class="home-row-heading">Keep watching</h2>
                   <div v-if="richContentEnabled" class="home-row-rail">
@@ -225,11 +225,10 @@
                     <span class="icon favorites_icon"></span>
                     <span>Favorites</span>
                   </button>
-                  <label class="rich-toggle-label home-rich-toggle">
-                    <input type="checkbox" v-model="richContentEnabled" @change="onRichToggle" class="rich-toggle-input">
-                    <span class="rich-toggle-mark" aria-hidden="true"></span>
-                    <span class="rich-toggle-text">Rich Content</span>
-                  </label>
+                  <button type="button" role="switch" class="rich-switch home-rich-toggle" :aria-checked="richContentEnabled ? 'true' : 'false'" @click="setRichContent(!richContentEnabled)">
+                    <span class="rich-switch-track" aria-hidden="true"><span class="rich-switch-thumb"></span></span>
+                    <span class="rich-switch-text">Rich Content</span>
+                  </button>
                 </nav>
               </div>
               </div>
@@ -253,10 +252,10 @@
                   </form>
               </div>
               <div v-else class="topbar">
-                      <button @click="back()" class="btn btn-dark backarrow">
+                      <button @click="back()" class="btn btn-dark backarrow" aria-label="Back" title="Back">
                         <div class="icon back_icon"/>
                       </button>
-                      <button v-if="searchterm === '[history]'" @click="onClearHistory()" class="btn btn-dark topbar-center-btn">
+                      <button v-if="searchterm === '[history]'" @click="onClearHistory()" class="btn btn-dark topbar-center-btn" aria-label="Clear history" title="Clear history">
                           <div class="icon history_icon"/>
                       </button>
                       <div v-else-if="searchterm === '[favorites]'">
@@ -270,6 +269,7 @@
                           <div class="icon trending_icon" style="display:inline-block;vertical-align:middle;"/>
                       </div>
               </div>
+              <h1 v-if="richContentEnabled && pageHeading" class="results-heading">{{ pageHeading }}</h1>
               <loading-spinner v-if="results === null"/>
               <div v-else class="tablewrapper">
                   <div v-if="(richContentEnabled || pinnedTitle) && groups.length > 0" class="rich-results-content">
@@ -388,6 +388,7 @@
                   </div>
                   <div v-else class="flat-results">
                       <p v-if="richSearchPending" class="rich-search-pending">Loading more results</p>
+                      <p v-if="!richSearchPending && !flatResults.length" class="empty-state">{{ emptyMessage }}</p>
                       <table class="table table-hover">
                           <tbody>
                               <tr
@@ -407,11 +408,11 @@
         <script type="text/x-template" id="filelist-screen-template">
             <div class="root">
               <div class="topbar">
-                  <button @click="back()" class="btn btn-dark backarrow">
+                  <button @click="back()" class="btn btn-dark backarrow" aria-label="Back" title="Back">
                     <div class="icon back_icon"/>
                   </button>
                   <div class="buttons">
-                      <button class="btn btn-dark" @click="toggleFavorite()">
+                      <button class="btn btn-dark" @click="toggleFavorite()" :aria-label="isTorrentFavorited ? 'Remove from favorites' : 'Add to favorites'" :aria-pressed="isTorrentFavorited ? 'true' : 'false'">
                         <div :class="'icon ' + (isTorrentFavorited ? 'favorites_icon' : 'favorites_empty_icon')"/>
                       </button>
                       <fullscreen-button/>
@@ -439,14 +440,14 @@
             </div>
             <div v-else class="root">
               <div class="topbar topbar-flex">
-                  <button @click="back()" class="btn btn-dark backarrow">
+                  <button @click="back()" class="btn btn-dark backarrow" aria-label="Back" title="Back">
                     <div class="icon back_icon"/>
                   </button>
                   <div class="filename-truncate">
                   {{params.filename}}
                   </div>
                   <div class="buttons">
-                      <button v-if="canStream && !streamRequested" @click="startStream()" class="btn btn-dark" title="Stream while downloading">&#9654;</button>
+                      <button v-if="canStream && !streamRequested" @click="startStream()" class="btn btn-dark" title="Stream while downloading" aria-label="Stream while downloading">&#9654;</button>
                       <favorite-button :magnet="params.magnet_link" :filename="params.filename"/>
                       <fullscreen-button/>
                   </div>
@@ -466,7 +467,7 @@
         <script type="text/x-template" id="player-template">
                  <div class="video_wrapper" :class="{ 'controls-hidden': richContentEnabled && !controlsOn }">
                    <div class="topbar topbar-flex" v-if="!richContentEnabled && hovering">
-                       <button @click="back()" class="btn btn-dark backarrow">
+                       <button @click="back()" class="btn btn-dark backarrow" aria-label="Back" title="Back">
                          <div class="icon back_icon"/>
                        </button>
                        <div class="filename-truncate">
@@ -591,11 +592,11 @@
         </script>
 
         <script type="text/x-template" id="fullscreen-button-template">
-            <button class="btn btn-dark fullscreen_button" @click="toggleFullscreen()"><div class="icon fullscreen_icon"/></button>
+            <button class="btn btn-dark fullscreen_button" @click="toggleFullscreen()" aria-label="Full screen" title="Full screen"><div class="icon fullscreen_icon"/></button>
         </script>
 
         <script type="text/x-template" id="caption-button-template">
-            <button v-if="trackCount > 0" class="btn btn-dark" @click="flipCaptions()">{{currentCaption || "&#128172;"}}</button>
+            <button v-if="trackCount > 0" class="btn btn-dark" @click="flipCaptions()" aria-label="Change subtitles" title="Change subtitles">{{currentCaption || "&#128172;"}}</button>
         </script>
 
         <script type="text/x-template" id="chromecast-button-template">
@@ -606,9 +607,9 @@
         </script>
 
         <script type="text/x-template" id="favorite-button-template">
-            <button class="btn btn-dark" @click="toggle()"><div :class="'icon ' + (isFavorited ? 'favorites_icon' : 'favorites_empty_icon')"/></button>
+            <button class="btn btn-dark" @click="toggle()" :aria-label="isFavorited ? 'Remove from favorites' : 'Add to favorites'" :aria-pressed="isFavorited ? 'true' : 'false'"><div :class="'icon ' + (isFavorited ? 'favorites_icon' : 'favorites_empty_icon')"/></button>
         </script>
 
-        <script src="/app.js?v=20261002-episode-pack"></script>
+        <script src="/app.js?v=20261012-ui-review"></script>
     </body>
 </html>

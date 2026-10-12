@@ -938,49 +938,6 @@ video::cue {
     opacity: 0.85;
     pointer-events: none;
 }
-.home-shortcuts .home-rich-toggle {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    flex: 0 0 auto;
-    margin: 0;
-    align-self: center;
-    font-size: 14px;
-    line-height: 1.2;
-    color: rgba(255, 255, 255, 0.8);
-    white-space: nowrap;
-}
-.home-shortcuts .home-rich-toggle {
-    position: relative;
-}
-.home-shortcuts .home-rich-toggle .rich-toggle-input {
-    position: absolute;
-    top: 0;
-    width: 28px;
-    height: 28px;
-    margin: 0;
-    opacity: 0;
-    cursor: pointer;
-}
-.home-shortcuts .rich-toggle-mark {
-    box-sizing: border-box;
-    width: 28px;
-    height: 28px;
-    border: 3.5px solid #fff;
-    border-radius: 9px;
-    background: #000;
-}
-.home-shortcuts .rich-toggle-input:checked + .rich-toggle-mark {
-    border-color: transparent;
-    background: url("/lib/checkbox-checked.png") center / 100% 100% no-repeat;
-}
-.home-shortcuts .home-rich-toggle:focus-within {
-    color: #fff;
-    outline: 2px solid #fff;
-    outline-offset: 8px;
-    border-radius: 8px;
-}
 .home-root {
     overflow: hidden;
 }
@@ -1060,8 +1017,9 @@ video::cue {
 }
 .home-shortcuts {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 36px;
+    gap: 20px 36px;
     margin-top: 12px;
     padding: 16px 28px 12px;
 }
@@ -1317,26 +1275,6 @@ video::cue {
     overflow: visible;
 }
 
-.rich-toggle-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    color: rgba(255, 255, 255, 0.78);
-    cursor: pointer;
-    font-size: 14px;
-    user-select: none;
-    white-space: nowrap;
-}
-
-.rich-toggle-input {
-    accent-color: #5bc0de;
-    cursor: pointer;
-    margin: 0;
-}
-
-.rich-toggle-label:focus-within {
-    color: #fff;
-}
 
 /* Grouped results */
 .rich-results-content {
@@ -1693,7 +1631,7 @@ video::cue {
 .result-size {
     float: right;
     margin-left: 12px;
-    color: rgba(255, 255, 255, 0.48);
+    color: rgba(255, 255, 255, 0.62);
     font-size: 12px;
     white-space: nowrap;
 }
@@ -1723,10 +1661,6 @@ video::cue {
         padding-right: 4px;
     }
 
-    .rich-toggle-label {
-        gap: 5px;
-        font-size: 12px;
-    }
 
     .topbar .search-results-title {
         max-width: 38%;
@@ -1749,9 +1683,6 @@ video::cue {
         padding-right: 0;
     }
 
-    .rich-toggle-label {
-        font-size: 11px;
-    }
 
     .group-side {
         flex-basis: 72px;
@@ -1821,4 +1752,100 @@ tr.resolution-heading td {
     font-weight: 600;
     letter-spacing: 0.04em;
     cursor: default;
+}
+
+/* Rich Content switch */
+.rich-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 4px;
+    color: rgba(255, 255, 255, 0.8);
+    background: none;
+    border: 0;
+    font-size: 14px;
+    line-height: 1.2;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.home-shortcuts .rich-switch {
+    flex-direction: column;
+    gap: 8px;
+}
+
+.rich-switch-track {
+    position: relative;
+    flex: 0 0 auto;
+    width: 46px;
+    height: 26px;
+    border: 2px solid rgba(255, 255, 255, 0.7);
+    border-radius: 13px;
+    box-sizing: border-box;
+    background: transparent;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.rich-switch-thumb {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.85);
+    transition: transform 0.15s, background 0.15s;
+}
+
+.rich-switch[aria-checked="true"] .rich-switch-track {
+    border-color: #2a9fd6;
+    background: #2a9fd6;
+}
+
+.rich-switch[aria-checked="true"] .rich-switch-thumb {
+    background: #fff;
+    transform: translateX(20px);
+}
+
+.rich-switch:hover,
+.rich-switch:focus,
+.rich-switch:focus-visible {
+    color: #fff;
+}
+
+.rich-switch:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 6px;
+    border-radius: 8px;
+}
+
+.form-control::placeholder {
+    color: rgba(255, 255, 255, 0.62);
+    opacity: 1;
+}
+
+.results-heading {
+    margin: 18px 28px 4px;
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.empty-state {
+    margin: 24px 28px;
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 15px;
+}
+
+@media (max-width: 480px) {
+    .home-shortcuts {
+        gap: 16px 20px;
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .results-heading,
+    .empty-state {
+        margin-left: 16px;
+        margin-right: 16px;
+    }
 }
