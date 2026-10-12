@@ -78,7 +78,7 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
-def _year_from_details(details: dict[str, Any], media_type: str) -> int | None:
+def year_from_details(details: dict[str, Any], media_type: str) -> int | None:
     year = _as_int(details.get("year"))
     if year is not None:
         return year
@@ -90,7 +90,7 @@ def _year_from_details(details: dict[str, Any], media_type: str) -> int | None:
     return None
 
 
-def _details_for_match(
+def details_for_match(
     client: TMDBClient, match: dict[str, Any]
 ) -> tuple[str, dict[str, Any]] | None:
     media_type = match.get("media_type")
@@ -98,18 +98,16 @@ def _details_for_match(
     if media_type not in ("tv", "movie") or tmdb_id is None:
         return None
 
-    first_type, second_type = ("tv", "movie") if media_type == "tv" else ("movie", "tv")
-    for candidate_type in (first_type, second_type):
-        try:
-            details = client.get_tv_details(tmdb_id) if candidate_type == "tv" else client.get_movie_details(tmdb_id)
-        except Exception:
-            details = None
-        if isinstance(details, dict) and details:
-            return candidate_type, details
+    try:
+        details = client.get_tv_details(tmdb_id) if media_type == "tv" else client.get_movie_details(tmdb_id)
+    except Exception:
+        return None
+    if isinstance(details, dict) and details:
+        return media_type, details
     return None
 
 
-def _card_details(client: TMDBClient, details: dict[str, Any]) -> dict[str, Any]:
+def card_details(client: TMDBClient, details: dict[str, Any]) -> dict[str, Any]:
     """Plot, genres, rating, backdrop, and runtime already present on a details response."""
     overview = details.get("overview")
     overview_text = overview.strip() if isinstance(overview, str) else ""
@@ -334,9 +332,9 @@ def _make_group(
     except Exception:
         poster_url = None
 
-    year = _year_from_details(details, media_type)
+    year = year_from_details(details, media_type)
     if year is None:
-        year = _year_from_details(match, media_type)
+        year = year_from_details(match, media_type)
 
     group: dict[str, Any] = {
         "tmdb_id": tmdb_id,
@@ -347,7 +345,7 @@ def _make_group(
         "seasons": {} if media_type == "tv" else [],
         "results": [] if media_type == "movie" else [],
     }
-    group.update(_card_details(client, details))
+    group.update(card_details(client, details))
     group["adult"] = details.get("adult") is True or details.get("softcore") is True
     if media_type == "tv":
         latest = _latest_episode(client, details)
@@ -359,7 +357,7 @@ def _make_group(
     return (media_type, tmdb_id), group
 
 
-def _parsed_seasons(parsed: dict[str, Any]) -> list[int]:
+def parsed_seasons(parsed: dict[str, Any]) -> list[int]:
     """Seasons a torrent belongs to. A pack covering several seasons lists each one."""
     raw_seasons = parsed.get("seasons")
     if isinstance(raw_seasons, list):
@@ -376,13 +374,13 @@ def _parsed_seasons(parsed: dict[str, Any]) -> list[int]:
 
 def _add_result_to_group(group: dict[str, Any], result: dict[str, Any], parsed: dict[str, Any]) -> bool:
     if group["media_type"] == "movie":
-        if _parsed_seasons(parsed):
+        if parsed_seasons(parsed):
             return False
         movie_results: list[dict[str, Any]] = group["results"]
         movie_results.append(dict(result))
         return True
 
-    season_numbers = _parsed_seasons(parsed)
+    season_numbers = parsed_seasons(parsed)
     if not season_numbers:
         return False
     seasons: dict[int, list[tuple[int | None, str, dict[str, Any]]]] = group["seasons"]
@@ -398,7 +396,7 @@ def _candidate_year(candidate: dict[str, Any]) -> int | None:
     media_type = candidate.get("media_type")
     if media_type not in ("tv", "movie"):
         return None
-    return _year_from_details(candidate, media_type)
+    return year_from_details(candidate, media_type)
 
 
 def _select_group_for_result(
@@ -415,7 +413,7 @@ def _select_group_for_result(
     if not groups:
         return None
     parsed_year = _as_int(parsed.get("year"))
-    if _parsed_seasons(parsed):
+    if parsed_seasons(parsed):
         tv_groups = [group for group in groups if group["media_type"] == "tv"]
         for group in tv_groups:
             show_year = group.get("year")
@@ -532,7 +530,7 @@ def _enrich_focused(
     for result, parsed, parsed_title in parsed_results:
         if not _title_is_accepted(parsed_title, accepted):
             continue
-        if media_type == "movie" and _parsed_seasons(parsed):
+        if media_type == "movie" and parsed_seasons(parsed):
             continue
         selected = _select_group_for_result([group], parsed)
         if selected is None:
@@ -596,7 +594,7 @@ def prepare_search(results: list[dict[str, Any]]) -> PreparedSearch:
             continue
         unique_titles.setdefault(normalized, parsed_title)
         counts[normalized] = counts.get(normalized, 0) + 1
-        if _parsed_seasons(parsed):
+        if parsed_seasons(parsed):
             tv_titles.add(normalized)
             continue
         parsed_year = _as_int(parsed.get("year"))
@@ -665,7 +663,7 @@ def resolve_title(
             continue
         detail_lookups += 1
         if fetch_details:
-            resolved = _details_for_match(client, candidate)
+            resolved = details_for_match(client, candidate)
             if resolved is None:
                 continue
             media_type, details = resolved

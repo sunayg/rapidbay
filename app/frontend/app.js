@@ -1,9 +1,28 @@
 (function () {
+    function isTextEntry(el) {
+        if (!el) {
+            return false;
+        }
+        if (el.tagName === "TEXTAREA" || el.isContentEditable) {
+            return true;
+        }
+        if (el.tagName !== "INPUT") {
+            return false;
+        }
+        return ["button", "checkbox", "radio", "range", "submit", "reset", "file", "image", "color"].indexOf((el.type || "text").toLowerCase()) === -1;
+    }
+
     var keylistener = function (e) {
         var keycode = e.keyCode ? e.keyCode : e.which;
         var name = e.key || "";
         var lowername = name.toLowerCase();
         var direction = arrowDirection(e);
+        var typing = isTextEntry(document.activeElement);
+        // In a text field, Backspace edits and left/right move the caret; up and
+        // down still leave the field.
+        if (typing && (lowername === "backspace" || direction === "left" || direction === "right")) {
+            return;
+        }
         var isSelect = lowername === "enter" || lowername === "select" || keycode === 13 || keycode === 23;
         if (isSelect) {
             if (document.activeElement && document.activeElement.tagName === "INPUT") {
@@ -292,7 +311,7 @@
     function get(url, callback) {
         var request;
         if (!document.cookie) {
-            document.cookie = localStorage.getItem("cookie");
+            document.cookie = storageGet("cookie");
         }
         function _callback(data) {
             pending_requests = pending_requests.filter(function (req) {
@@ -307,7 +326,7 @@
 
     function post(url, data, callback) {
         if (!document.cookie) {
-            document.cookie = localStorage.getItem("cookie");
+            document.cookie = storageGet("cookie");
         }
         $.post(url, data, callback);
     }
@@ -321,7 +340,7 @@
             return null;
         }
         if (!document.cookie) {
-            document.cookie = localStorage.getItem("cookie");
+            document.cookie = storageGet("cookie");
         }
         var es = new EventSource(url);
         es.onmessage = function (e) {
@@ -342,7 +361,7 @@
     // charts endpoints and the home, search and player screens stay classic.
     function richContentOn() {
         try {
-            return localStorage.getItem("richContentEnabled") === "true";
+            return storageGet("richContentEnabled") === "true";
         } catch (error) {
             return false;
         }
@@ -353,7 +372,7 @@
             return;
         }
         if (!document.cookie) {
-            document.cookie = localStorage.getItem("cookie");
+            document.cookie = storageGet("cookie");
         }
         $.ajax({
             url: "/api/library/observe/",
@@ -396,7 +415,7 @@
                 ts: entry.ts || 0,
             });
         });
-        var completed = JSON.parse(localStorage.getItem("completedFiles") || "{}");
+        var completed = readJSON("completedFiles", {});
         Object.keys(completed).forEach(function (hash) {
             var magnet = magnetsByHash[hash] || ("magnet:?xt=urn:btih:" + hash);
             (completed[hash] || []).forEach(function (filename) {
@@ -416,8 +435,68 @@
         });
     }
 
+    // localStorage can throw (quota, blocked storage) or hold a value that no
+    // longer parses; neither should abort a render.
+    function storageGet(key) {
+        try {
+            return window.localStorage.getItem(key);
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function storageSet(key, value) {
+        try {
+            window.localStorage.setItem(key, value);
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function storageRemove(key) {
+        try {
+            window.storageRemove(key);
+        } catch (error) {
+            // nothing to clean up when storage is unavailable
+        }
+    }
+
+    function storageKeys() {
+        var keys = [];
+        try {
+            for (var i = window.localStorage.length - 1; i >= 0; i--) {
+                keys.push(window.localStorage.key(i));
+            }
+        } catch (error) {
+            return [];
+        }
+        return keys;
+    }
+
+    // fallback decides the expected shape: an array or a plain object
+    function readJSON(key, fallback) {
+        var raw = storageGet(key);
+        if (raw === null) {
+            return fallback;
+        }
+        try {
+            var value = JSON.parse(raw);
+            if (Array.isArray(fallback)) {
+                return Array.isArray(value) ? value : fallback;
+            }
+            return value && typeof value === "object" && !Array.isArray(value) ? value : fallback;
+        } catch (error) {
+            return fallback;
+        }
+    }
+
+    function writeJSON(key, value) {
+        return storageSet(key, JSON.stringify(value));
+    }
+
     function saveToHistory(magnet) {
-        var history = JSON.parse(localStorage.getItem("downloadHistory") || "[]");
+        var history = readJSON("downloadHistory", []);
         history = history.filter(function (h) {
             return h.magnet !== magnet;
         });
@@ -426,25 +505,25 @@
         if (history.length > 50) {
             history = history.slice(0, 50);
         }
-        localStorage.setItem("downloadHistory", JSON.stringify(history));
+        writeJSON("downloadHistory", history);
     }
 
     function getHistory() {
-        return JSON.parse(localStorage.getItem("downloadHistory") || "[]");
+        return readJSON("downloadHistory", []);
     }
 
     function clearHistory() {
-        localStorage.removeItem("downloadHistory");
-        localStorage.removeItem("completedFiles");
-        localStorage.removeItem("completedAt");
-        localStorage.removeItem("searchHistory");
-        localStorage.removeItem("watchLog");
-        localStorage.removeItem("localTitles");
+        storageRemove("downloadHistory");
+        storageRemove("completedFiles");
+        storageRemove("completedAt");
+        storageRemove("searchHistory");
+        storageRemove("watchLog");
+        storageRemove("localTitles");
     }
 
     function saveSearchTerm(term) {
         if (!term || term.trim() === "") return;
-        var history = JSON.parse(localStorage.getItem("searchHistory") || "[]");
+        var history = readJSON("searchHistory", []);
         history = history.filter(function (t) {
             return t.toLowerCase() !== term.toLowerCase();
         });
@@ -452,7 +531,7 @@
         if (history.length > 8) {
             history = history.slice(0, 8);
         }
-        localStorage.setItem("searchHistory", JSON.stringify(history));
+        writeJSON("searchHistory", history);
         reportLibraryEvents([{
             event: "search",
             title: term.trim(),
@@ -462,24 +541,24 @@
     }
 
     function getSearchHistory() {
-        return JSON.parse(localStorage.getItem("searchHistory") || "[]").slice(0, 8);
+        return readJSON("searchHistory", []).slice(0, 8);
     }
 
     function clearSearchHistory() {
-        localStorage.removeItem("searchHistory");
+        storageRemove("searchHistory");
     }
 
     function markFileCompleted(magnet, filename) {
         var hash = get_hash(magnet);
-        var completed = JSON.parse(localStorage.getItem("completedFiles") || "{}");
+        var completed = readJSON("completedFiles", {});
         if (!completed[hash]) completed[hash] = [];
         if (completed[hash].indexOf(filename) === -1) {
             completed[hash].push(filename);
         }
-        localStorage.setItem("completedFiles", JSON.stringify(completed));
-        var completedAt = JSON.parse(localStorage.getItem("completedAt") || "{}");
+        writeJSON("completedFiles", completed);
+        var completedAt = readJSON("completedAt", {});
         completedAt[hash + "\n" + filename] = Date.now();
-        localStorage.setItem("completedAt", JSON.stringify(completedAt));
+        writeJSON("completedAt", completedAt);
         rememberWatched(magnet, filename);
         reportLibraryEvents([{
             event: "watched",
@@ -492,12 +571,12 @@
 
     function getCompletedFiles(magnet) {
         var hash = get_hash(magnet);
-        var completed = JSON.parse(localStorage.getItem("completedFiles") || "{}");
+        var completed = readJSON("completedFiles", {});
         return completed[hash] || [];
     }
 
     function getFavorites() {
-        var favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
+        var favorites = readJSON("favorites", []);
         return favorites.sort(function (a, b) {
             return (a.title || "").localeCompare(b.title || "");
         });
@@ -505,7 +584,7 @@
 
     function saveFavorite(magnet, filename) {
         var magnetHash = get_hash(magnet);
-        var favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
+        var favorites = readJSON("favorites", []);
         favorites = favorites.filter(function (f) {
             return get_hash(f.magnet) !== magnetHash || f.filename !== filename;
         });
@@ -514,16 +593,16 @@
         if (favorites.length > 100) {
             favorites = favorites.slice(0, 100);
         }
-        localStorage.setItem("favorites", JSON.stringify(favorites));
+        writeJSON("favorites", favorites);
     }
 
     function removeFavorite(magnet, filename) {
         var magnetHash = get_hash(magnet);
-        var favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
+        var favorites = readJSON("favorites", []);
         favorites = favorites.filter(function (f) {
             return get_hash(f.magnet) !== magnetHash || f.filename !== filename;
         });
-        localStorage.setItem("favorites", JSON.stringify(favorites));
+        writeJSON("favorites", favorites);
     }
 
     function getVideoPositionKey(magnet, filename) {
@@ -531,7 +610,7 @@
     }
 
     function readStoredProgress(key) {
-        var raw = localStorage.getItem(key);
+        var raw = storageGet(key);
         if (!raw) {
             return { position: 0, duration: 0, ts: 0 };
         }
@@ -553,11 +632,11 @@
     function saveVideoPosition(magnet, filename, position, duration) {
         var previous = readStoredProgress(getVideoPositionKey(magnet, filename));
         var storedDuration = duration || previous.duration || 0;
-        localStorage.setItem(getVideoPositionKey(magnet, filename), JSON.stringify({
+        writeJSON(getVideoPositionKey(magnet, filename), {
             position: position,
             duration: storedDuration,
             ts: Date.now(),
-        }));
+        });
         rememberProgress(magnet, filename, position, storedDuration);
     }
 
@@ -611,8 +690,9 @@
     function collectInProgressEvents() {
         var events = [];
         var cutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
-        for (var i = localStorage.length - 1; i >= 0; i--) {
-            var key = localStorage.key(i);
+        var keys = storageKeys();
+        for (var i = 0; i < keys.length; i++) {
+            var key = keys[i];
             if (!key || key.indexOf("videoPosition_") !== 0) {
                 continue;
             }
@@ -627,24 +707,24 @@
             if (!(stored.position > 120) || progressCountsAsWatched(stored.position, stored.duration)) {
                 continue;
             }
-            var completed = JSON.parse(localStorage.getItem("completedFiles") || "{}");
+            var completed = readJSON("completedFiles", {});
             var finishedNames = completed[hash] || [];
             if (finishedNames.indexOf(filename) !== -1) {
-                var completedAt = JSON.parse(localStorage.getItem("completedAt") || "{}");
+                var completedAt = readJSON("completedAt", {});
                 var finishedAt = parseInt(completedAt[hash + "\n" + filename], 10) || 0;
                 var leftover = !stored.duration || (finishedAt && stored.ts && stored.ts <= finishedAt);
                 if (leftover) {
-                    localStorage.removeItem(key);
+                    storageRemove(key);
                     continue;
                 }
             }
             if (!stored.ts) {
                 stored.ts = Date.now();
-                localStorage.setItem(key, JSON.stringify({
+                writeJSON(key, {
                     position: stored.position,
                     duration: stored.duration,
                     ts: stored.ts,
-                }));
+                });
             }
             if (stored.ts < cutoff) {
                 continue;
@@ -663,7 +743,7 @@
     }
 
     function readWatchLog() {
-        var raw = localStorage.getItem("watchLog");
+        var raw = storageGet("watchLog");
         if (raw === null) {
             return seedWatchLog();
         }
@@ -679,7 +759,7 @@
         if (log.length > 200) {
             log = log.slice(0, 200);
         }
-        localStorage.setItem("watchLog", JSON.stringify(log));
+        writeJSON("watchLog", log);
     }
 
     function watchFileKey(magnet, filename) {
@@ -730,8 +810,8 @@
 
     function seedWatchLog() {
         var events = collectInProgressEvents();
-        var completed = JSON.parse(localStorage.getItem("completedFiles") || "{}");
-        var completedAt = JSON.parse(localStorage.getItem("completedAt") || "{}");
+        var completed = readJSON("completedFiles", {});
+        var completedAt = readJSON("completedAt", {});
         Object.keys(completed).forEach(function (hash) {
             var magnet = magnetForHash(hash);
             (completed[hash] || []).forEach(function (filename) {
@@ -749,13 +829,10 @@
     }
 
     function readLocalTitles() {
-        try {
-            var titles = JSON.parse(localStorage.getItem("localTitles") || "[]");
-            return Array.isArray(titles) ? titles : [];
-        } catch (error) {
-            return [];
-        }
+        return readJSON("localTitles", []);
     }
+
+    var MAX_LOCAL_TITLES = 300;
 
     function saveLocalTitles(cards) {
         var byKey = {};
@@ -795,7 +872,14 @@
             });
             byKey[key] = current;
         });
-        localStorage.setItem("localTitles", JSON.stringify(Object.values(byKey)));
+        var kept = Object.values(byKey);
+        if (kept.length > MAX_LOCAL_TITLES) {
+            kept.sort(function (a, b) {
+                return (Number(b.watched_at) || 0) - (Number(a.watched_at) || 0);
+            });
+            kept = kept.slice(0, MAX_LOCAL_TITLES);
+        }
+        writeJSON("localTitles", kept);
     }
 
     function fetchWatchRows(callback) {
@@ -805,7 +889,7 @@
             return;
         }
         if (!document.cookie) {
-            document.cookie = localStorage.getItem("cookie");
+            document.cookie = storageGet("cookie");
         }
         $.ajax({
             url: "/api/watch_rows/",
@@ -823,7 +907,7 @@
     }
 
     function clearVideoPosition(magnet, filename) {
-        localStorage.removeItem(getVideoPositionKey(magnet, filename));
+        storageRemove(getVideoPositionKey(magnet, filename));
     }
 
     function get_hash(magnet_link) {
@@ -938,6 +1022,11 @@
             return { media: media, tmdb: tmdb };
         }
         return null;
+    }
+
+    // Navigo decodes route params once, so a single encode round-trips any term
+    function searchPath(term) {
+        return "/search/" + encodeURIComponent(term);
     }
 
     function navigate(path, replaceState) {
@@ -1728,9 +1817,9 @@
                     }
                 }
                 if (chosen) {
-                    localStorage.setItem("captionLanguage", chosen);
+                    storageSet("captionLanguage", chosen);
                 } else {
-                    localStorage.removeItem("captionLanguage");
+                    storageRemove("captionLanguage");
                 }
                 this.refreshTracks();
             },
@@ -1979,7 +2068,7 @@
             }
             function applyCaptionPreference() {
                 var tracks = video.textTracks;
-                var captionLanguage = normalizeLanguage(localStorage.getItem("captionLanguage"));
+                var captionLanguage = normalizeLanguage(storageGet("captionLanguage"));
                 if (!captionLanguage) return;
                 // Don't mutate modes unless we're actually selecting one — hls.js's
                 // text-track poll treats any non-"disabled" track as the active
@@ -2039,12 +2128,9 @@
                     }
                 }
                 if (captionLanguage) {
-                    window.localStorage.setItem(
-                        "captionLanguage",
-                        normalizeLanguage(captionLanguage)
-                    );
+                    storageSet("captionLanguage", normalizeLanguage(captionLanguage));
                 } else {
-                    window.localStorage.removeItem("captionLanguage");
+                    storageRemove("captionLanguage");
                 }
             };
 
@@ -2317,7 +2403,7 @@
                     return;
                 }
                 if (!document.cookie) {
-                    document.cookie = localStorage.getItem("cookie");
+                    document.cookie = storageGet("cookie");
                 }
                 // The TV cannot send the password, so it gets a signed link for this torrent.
                 $.ajax({
@@ -2445,7 +2531,7 @@
             return {
                 searchterm: "",
                 searchHistory: [],
-                richContentEnabled: localStorage.getItem("richContentEnabled") === "true",
+                richContentEnabled: storageGet("richContentEnabled") === "true",
                 keepWatching: [],
                 recentTitles: [],
                 topSeries: [],
@@ -2455,7 +2541,7 @@
         },
         methods: {
             onRichToggle: function () {
-                localStorage.setItem("richContentEnabled", this.richContentEnabled ? "true" : "false");
+                storageSet("richContentEnabled", this.richContentEnabled ? "true" : "false");
                 this.applyPageBackground();
                 if (this.richContentEnabled) {
                     syncLibraryFromLocalHistory();
@@ -2577,7 +2663,7 @@
                 }
                 this.searchterm = term;
                 saveSearchTerm(term);
-                var path = "/search/" + term;
+                var path = searchPath(term);
                 if (title.tmdb_id && (title.media_type === "tv" || title.media_type === "movie")) {
                     path += "?media=" + title.media_type + "&tmdb=" + title.tmdb_id;
                 }
@@ -2594,13 +2680,13 @@
                     );
                 } else {
                     saveSearchTerm(this.searchterm);
-                    navigate("/search/" + this.searchterm);
+                    navigate(searchPath(this.searchterm));
                 }
             },
             onHistoryClick: function (term) {
                 this.searchterm = term;
                 saveSearchTerm(term);
-                navigate("/search/" + term);
+                navigate(searchPath(term));
             },
             clearSearches: function () {
                 clearSearchHistory();
@@ -2800,7 +2886,7 @@
                 results: null,
                 searchterm: "",
                 query: "",
-                richContentEnabled: localStorage.getItem("richContentEnabled") === "true",
+                richContentEnabled: storageGet("richContentEnabled") === "true",
                 groups: [],
                 other: [],
                 openEpisodes: {},
@@ -2831,7 +2917,7 @@
                     return;
                 }
                 saveSearchTerm(term);
-                navigate("/search/" + term);
+                navigate(searchPath(term));
             },
             onResultClick: function (result, seasonNumber, episodeNumber) {
                 rememberEpisodeTarget(seasonNumber, episodeNumber);
@@ -3471,7 +3557,7 @@
                     return;
                 }
                 if (!document.cookie) {
-                    document.cookie = localStorage.getItem("cookie");
+                    document.cookie = storageGet("cookie");
                 }
                 var focused = false;
                 var source = new EventSource("/api/rich_search_events/" + encodeURIComponent(this.searchterm));
