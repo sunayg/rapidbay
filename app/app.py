@@ -52,6 +52,7 @@ from tmdb import TMDBClient, tmdb_disk_cache
 class SearchResult(BaseModel):
     title: str
     seeds: int
+    size: int | None = None
     magnet: str | None
     torrent_link: str | None = None
     status: str | None = None  # "downloading", "downloaded", or None
@@ -64,6 +65,7 @@ class SearchResponse(BaseModel):
 class RichSearchEpisodeItem(BaseModel):
     title: str
     seeds: int
+    size: int | None = None
     magnet: str | None = None
     torrent_link: str | None = None
     status: str | None = None
@@ -104,6 +106,7 @@ class RichSearchGroup(BaseModel):
 class RichSearchResultItem(BaseModel):
     title: str
     seeds: int
+    size: int | None = None
     magnet: str | None = None
     torrent_link: str | None = None
     status: str | None = None
@@ -864,6 +867,7 @@ def _serialize_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         {
             "title": r.get("title"),
             "seeds": r.get("seeds", 0),
+            "size": r.get("size"),
             "magnet": r.get("magnet"),
             "torrent_link": r.get("torrent_link"),
             "status": r.get("status"),
