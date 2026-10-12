@@ -389,7 +389,7 @@
                           <tbody>
                               <tr
                               tabindex="0"
-                              v-for="result in (richContentEnabled ? other : results)"
+                              v-for="result in flatResults"
                               @click="onResultClick(result)"
                               >
                                   <td :title="result.seeds ? (result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')) : ''"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ result.title }}<span v-if="richContentEnabled && result.seeds" class="result-seeds">{{ result.seeds }} seeds</span></td>
