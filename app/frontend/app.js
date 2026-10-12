@@ -66,7 +66,7 @@
 
     function homeFocusTargets() {
         return Array.prototype.filter.call(
-            document.querySelectorAll(".form-control, .rich-toggle-label input, .billboard-card, .poster-card, .home-basic-item, .search-chip, .search-history-item, .search-history-clear, .home-shortcut"),
+            document.querySelectorAll(".form-control, .rich-switch, .billboard-card, .poster-card, .home-basic-item, .search-chip, .search-history-item, .search-history-clear, .home-shortcut"),
             function (el) {
                 if (el.disabled) {
                     return false;
@@ -2537,9 +2537,14 @@
                 topSeries: [],
                 topMovies: [],
                 homeRetried: false,
+                homeLoaded: false,
             };
         },
         methods: {
+            setRichContent: function (value) {
+                this.richContentEnabled = !!value;
+                this.onRichToggle();
+            },
             onRichToggle: function () {
                 storageSet("richContentEnabled", this.richContentEnabled ? "true" : "false");
                 this.applyPageBackground();
@@ -2629,6 +2634,7 @@
             loadLocalRows: function () {
                 var self = this;
                 fetchWatchRows(function (data) {
+                    self.homeLoaded = true;
                     self.keepWatching = data && data.keep_watching ? data.keep_watching : [];
                     self.recentTitles = data && data.recent ? data.recent : [];
                     self.$nextTick(function () {
@@ -3541,6 +3547,10 @@
                 }
                 this.richSearchPending = false;
                 this.richStreamSettled = true;
+                if (!this.pinnedTitle && this.groups.length === 1 && !this.isGroupOpen(this.groups[0])) {
+                    this.$set(this.openGroups, this.groupOpenKey(this.groups[0]), true);
+                    this.prefetchOpenSeasons();
+                }
                 if (this.results !== null) {
                     return;
                 }
@@ -3692,6 +3702,27 @@
             // fill `results` and leave `other` empty.
             flatResults: function () {
                 return this.results && this.results.length ? this.results : this.other;
+            },
+            pageHeading: function () {
+                if (this.pinnedTitle) {
+                    return "";
+                }
+                if (this.searchterm === "[history]") {
+                    return "History";
+                }
+                if (this.searchterm === "[favorites]") {
+                    return "Favorites";
+                }
+                return this.searchterm ? "" : "Community Searches";
+            },
+            emptyMessage: function () {
+                if (this.searchterm === "[history]") {
+                    return "Nothing in your history yet.";
+                }
+                if (this.searchterm === "[favorites]") {
+                    return "No favorites yet. Tap the star on a file to add one.";
+                }
+                return this.searchterm ? "No results for \u201c" + this.searchterm + "\u201d." : "No results right now.";
             },
         },
         created: function () {
