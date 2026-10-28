@@ -2733,6 +2733,10 @@
             goTrending: function () {
                 navigate("/search/");
             },
+            goSettings: function () {
+                // The settings page is a separate Vue 3 app, so this is a full page load.
+                window.location.assign('/settings');
+            },
             goFavorites: function () {
                 navigate("/search/[favorites]");
             },

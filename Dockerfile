@@ -1,3 +1,11 @@
+# Vue 3 frontend (settings page)
+FROM node:22-alpine AS frontend-build
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend ./
+RUN npm run build
+
 # Build stage
 FROM ubuntu:24.04 AS builder
 
@@ -56,11 +64,13 @@ EXPOSE 6881/udp
 EXPOSE 5000
 
 COPY app /app
+# Outside /app so the ./app:/app bind mount in the compose files cannot hide it
+COPY --from=frontend-build /frontend/dist /frontend-v2
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 RUN rm -f /etc/nginx/sites-enabled/default
 RUN chmod +x /app/run.sh
 WORKDIR /app
 
-ENV USE_NGINX=1 DATA_DIR=/tmp FRONTEND_DIR=/app/frontend KODI_ADDON_DIR=/app/kodi.addon
+ENV USE_NGINX=1 DATA_DIR=/tmp FRONTEND_DIR=/app/frontend KODI_ADDON_DIR=/app/kodi.addon FRONTEND_V2_DIR=/frontend-v2
 
 CMD ["./run.sh"]

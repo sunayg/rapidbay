@@ -89,6 +89,16 @@ uvicorn app:app --host 0.0.0.0 --port 5000 --workers 1 --timeout-keep-alive 900
 
 App will be running at http://localhost:5000
 
+## Settings page
+
+Open `/settings` (or the Settings shortcut on the home screen) to change settings from the browser. Changes are saved to `settings.json` next to the library file (`LIBRARY_PATH`), so mount that directory as a volume to keep them across container rebuilds.
+
+A saved value beats the environment variable, which beats the built-in default. "Reset" removes the saved value; "Clear" saves an empty value that overrides the environment. Listening port and DHT routers need a restart; download and upload limits apply to torrents added afterwards. Storage paths stay environment-only.
+
+If `PASSWORD` is set, the page uses it. If it is not, anyone who can reach the server can open the page, and can set a password. To recover from a lockout, delete `settings.json`. A numeric `PASSWORD` from the environment (such as `1234`) now works; before it could never match.
+
+The page is a Vue 3 app in `frontend/` (`npm install && npm run dev` for development; the Dockerfile builds it).
+
 ## Subtitles
 
 You'll need a VIP account at OpenSubtitles.org for it to work:
