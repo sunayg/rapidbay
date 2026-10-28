@@ -315,6 +315,59 @@ class RapidBayDaemon:
 
         self._notify_state_change()
 
+    def _discard_torrent(self, magnet_hash: str, h: Any) -> None:
+        """Drop a torrent and everything downloaded for it."""
+        output_dir = _get_output_dir(magnet_hash)
+        # Kill any active HLS stream first; otherwise its ffmpeg +
+        # pipe-feeder threads outlive remove_files=True and spin
+        # forever waiting on bytes that will never arrive.
+        self.hls_streamer.stop_under(output_dir)
+        for f in torrent.get_torrent_info(h).files():
+            filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
+            self.subtitle_downloads.pop(filepath, None)
+            self._file_poll_times.pop((magnet_hash, os.path.basename(f.path)), None)
+            self._head_rushes.pop((magnet_hash, os.path.basename(f.path)), None)
+        self._web_seeded.pop(magnet_hash, None)
+        web_seed_proxy.unregister(magnet_hash)
+        self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
+        video_conversion.clear_master_playlist_cache_under(output_dir)
+
+    @threaded
+    @log.catch_and_log_exceptions
+    def cancel_download(self, magnet_hash: str, filename: str) -> None:
+        """Stop downloading a file and free what it fetched.
+
+        Runs on its own thread: while a magnet is still resolving metadata,
+        download_file holds the torrent lock for up to 30s and a cancel has to
+        wait for it. A file that has reached conversion or is already playable
+        is left alone. Other files of the same torrent keep downloading; the
+        torrent itself goes once none remain.
+        """
+        if not _is_valid_magnet_hash(magnet_hash):
+            return
+        with self.torrent_client.locks.lock(magnet_hash):
+            h = self.torrent_client.torrents.get(magnet_hash)
+            if not h:
+                return
+            status = self.get_file_status(magnet_hash, filename, include_hls=False)["status"]
+            if status in (FileStatus.READY, FileStatus.FINISHING_UP, FileStatus.CONVERTING):
+                return
+            index, _ = torrent.get_index_and_file_from_files(h, filename)
+            if index is None:
+                return
+            priorities = list(h.file_priorities())
+            priorities[index] = 0
+            for subtitle_index in _subtitle_indexes(h, filename):
+                priorities[subtitle_index] = 0
+            torrent.prioritize_files(h, priorities)
+            self.hls_streamer.stop(_m3u8_path(magnet_hash, filename))
+            self._file_poll_times.pop((magnet_hash, filename), None)
+            self._head_rushes.pop((magnet_hash, filename), None)
+            self._web_seeded.get(magnet_hash, set()).discard(filename)
+            if not any(priorities):
+                self._discard_torrent(magnet_hash, h)
+        self._notify_state_change()
+
     def note_file_poll(self, magnet_hash: str, filename: str) -> None:
         """Record that a client is watching this file's status — the
         viewer-liveness signal used to reap abandoned HLS streams."""
@@ -721,20 +774,7 @@ class RapidBayDaemon:
                 continue
             try:
                 if _torrent_is_stale(h):
-                    output_dir = _get_output_dir(magnet_hash)
-                    # Kill any active HLS stream first; otherwise its ffmpeg +
-                    # pipe-feeder threads outlive remove_files=True and spin
-                    # forever waiting on bytes that will never arrive.
-                    self.hls_streamer.stop_under(output_dir)
-                    for f in torrent.get_torrent_info(h).files():
-                        filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
-                        self.subtitle_downloads.pop(filepath, None)
-                        self._file_poll_times.pop((magnet_hash, os.path.basename(f.path)), None)
-                        self._head_rushes.pop((magnet_hash, os.path.basename(f.path)), None)
-                    self._web_seeded.pop(magnet_hash, None)
-                    web_seed_proxy.unregister(magnet_hash)
-                    self.torrent_client.remove_torrent(magnet_hash, remove_files=True)
-                    video_conversion.clear_master_playlist_cache_under(output_dir)
+                    self._discard_torrent(magnet_hash, h)
                 elif h.has_metadata():
                     with self.torrent_client.locks.lock(magnet_hash):
                         self._handle_torrent(magnet_hash)

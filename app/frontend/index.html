@@ -70,44 +70,7 @@
         </script>
 
         <script type="text/x-template" id="search-screen-template">
-            <div class="root" :class="richContentEnabled ? 'home-root' : 'classic-root'">
-              <template v-if="!richContentEnabled">
-                <div class="topbar topbar-classic">
-                  <button tabindex="0" @click="goHistory()" class="btn btn-dark backarrow" aria-label="History" title="History">
-                    <div class="icon history_icon"/>
-                  </button>
-                  <div>
-                    <button tabindex="0" @click="goTrending()" class="btn btn-dark" aria-label="Community searches" title="Community searches">
-                      <div class="icon trending_icon"/>
-                    </button>
-                  </div>
-                  <div class="buttons">
-                    <button tabindex="0" @click="goFavorites()" class="btn btn-dark" aria-label="Favorites" title="Favorites">
-                      <div class="icon favorites_icon"/>
-                    </button>
-                  </div>
-                </div>
-                <div class="wrapper">
-                    <button type="button" role="switch" class="rich-switch classic-rich-toggle" :aria-checked="richContentEnabled ? 'true' : 'false'" @click="setRichContent(!richContentEnabled)">
-                      <span class="rich-switch-track" aria-hidden="true"><span class="rich-switch-thumb"></span></span>
-                      <span class="rich-switch-text">View with rich media content</span>
-                    </button>
-                  <div class="classic-search">
-                    <form @submit="onSubmit">
-                      <div class="input-group">
-                        <input type="text" autofocus class="form-control" v-model="searchterm" autocorrect="off" autocapitalize="none">
-                        <div class="input-group-append">
-                          <button class="btn btn-light" type="submit" tabindex="-1" aria-label="Search"><div class="icon search_icon"/></button>
-                        </div>
-                      </div>
-                    </form>
-                    <div v-if="searchHistory.length > 0" class="search-history">
-                      <div tabindex="0" v-for="term in searchHistory" @click="onHistoryClick(term)" class="search-history-item">{{ term }}</div>
-                    </div>
-                  </div>
-                </div>
-              </template>
-              <template v-else>
+            <div class="root home-root">
               <div class="topbar topbar-home">
                   <a class="home-logo-link" href="/" @click.prevent="goHome()">
                     <img class="home-logo" src="/lib/rapidbay-logo.png" alt="RapidBay">
@@ -122,7 +85,7 @@
                 <p v-if="homeLoaded && !keepWatching.length && !recentTitles.length && !topSeries.length && !topMovies.length && !searchHistory.length" class="empty-state home-empty">Search for a movie or show to get started.</p>
                 <section v-if="keepWatching.length" class="home-row">
                   <h2 class="home-row-heading">Keep watching</h2>
-                  <div v-if="richContentEnabled" class="home-row-rail">
+                  <div class="home-row-rail">
                     <button type="button" class="row-nudge row-nudge-prev" aria-label="See previous titles" hidden @click="nudgeRow($event, -1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
                     <div class="billboard-scroller" @scroll="refreshRails">
                     <button type="button" class="billboard-card" v-for="title in keepWatching" :key="'keep-' + title.media_type + ':' + title.tmdb_id" @click="resumeTitle(title)">
@@ -138,13 +101,10 @@
                     </div>
                     <button type="button" class="row-nudge row-nudge-next" aria-label="See more titles" hidden @click="nudgeRow($event, 1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
                   </div>
-                  <div v-else class="home-basic-list">
-                    <button type="button" class="home-basic-item" v-for="title in keepWatching" :key="'keep-basic-' + title.media_type + ':' + title.tmdb_id" @click="resumeTitle(title)">{{ title.title }}<template v-if="cardSubtitle(title)"> · {{ cardSubtitle(title) }}</template><template v-if="title.minutes_left"> · {{ title.minutes_left }} min left</template></button>
-                  </div>
                 </section>
                 <section v-if="recentTitles.length" class="home-row">
                   <h2 class="home-row-heading">Recently watched</h2>
-                  <div v-if="richContentEnabled" class="home-row-rail">
+                  <div class="home-row-rail">
                     <button type="button" class="row-nudge row-nudge-prev" aria-label="See previous titles" hidden @click="nudgeRow($event, -1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
                     <div class="billboard-scroller" @scroll="refreshRails">
                     <button type="button" class="billboard-card" v-for="title in recentTitles" :key="'recent-' + title.media_type + ':' + title.tmdb_id" @click="openTitle(title)">
@@ -160,13 +120,10 @@
                     </div>
                     <button type="button" class="row-nudge row-nudge-next" aria-label="See more titles" hidden @click="nudgeRow($event, 1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
                   </div>
-                  <div v-else class="home-basic-list">
-                    <button type="button" class="home-basic-item" v-for="title in recentTitles" :key="'recent-basic-' + title.media_type + ':' + title.tmdb_id" @click="openTitle(title)">{{ title.title }}<template v-if="cardSubtitle(title)"> · {{ cardSubtitle(title) }}</template><template v-if="title.next_air_date"> · Next {{ formatAirDate(title.next_air_date) }}</template></button>
-                  </div>
                 </section>
                 <section v-if="topSeries.length" class="home-row">
                   <h2 class="home-row-heading">Top 10 series trending</h2>
-                  <div v-if="richContentEnabled" class="home-row-rail">
+                  <div class="home-row-rail">
                     <button type="button" class="row-nudge row-nudge-prev" aria-label="See previous titles" hidden @click="nudgeRow($event, -1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
                     <div class="billboard-scroller poster-scroller" @scroll="refreshRails">
                     <div class="rank-item" v-for="title in topSeries" :key="'series-' + title.tmdb_id">
@@ -179,13 +136,10 @@
                     </div>
                     <button type="button" class="row-nudge row-nudge-next" aria-label="See more titles" hidden @click="nudgeRow($event, 1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
                   </div>
-                  <div v-else class="home-basic-list">
-                    <button type="button" class="home-basic-item" v-for="title in topSeries" :key="'series-basic-' + title.tmdb_id" @click="openTitle(title)"><span class="home-basic-rank">{{ title.rank }}</span>{{ title.title }}<template v-if="title.next_air_date"> · Next {{ formatAirDate(title.next_air_date) }}</template></button>
-                  </div>
                 </section>
                 <section v-if="topMovies.length" class="home-row">
                   <h2 class="home-row-heading">Top 10 movies trending</h2>
-                  <div v-if="richContentEnabled" class="home-row-rail">
+                  <div class="home-row-rail">
                     <button type="button" class="row-nudge row-nudge-prev" aria-label="See previous titles" hidden @click="nudgeRow($event, -1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg></button>
                     <div class="billboard-scroller poster-scroller" @scroll="refreshRails">
                     <div class="rank-item" v-for="title in topMovies" :key="'movie-' + title.tmdb_id">
@@ -196,9 +150,6 @@
                     </div>
                     </div>
                     <button type="button" class="row-nudge row-nudge-next" aria-label="See more titles" hidden @click="nudgeRow($event, 1)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg></button>
-                  </div>
-                  <div v-else class="home-basic-list">
-                    <button type="button" class="home-basic-item" v-for="title in topMovies" :key="'movie-basic-' + title.tmdb_id" @click="openTitle(title)"><span class="home-basic-rank">{{ title.rank }}</span>{{ title.title }}</button>
                   </div>
                 </section>
                 <section v-if="searchHistory.length" class="home-row">
@@ -225,14 +176,9 @@
                     <span class="icon favorites_icon"></span>
                     <span>Favorites</span>
                   </button>
-                  <button type="button" role="switch" class="rich-switch home-rich-toggle" :aria-checked="richContentEnabled ? 'true' : 'false'" @click="setRichContent(!richContentEnabled)">
-                    <span class="rich-switch-track" aria-hidden="true"><span class="rich-switch-thumb"></span></span>
-                    <span class="rich-switch-text">Rich Content</span>
-                  </button>
                 </nav>
               </div>
               </div>
-              </template>
             </div>
         </script>
 
@@ -242,7 +188,7 @@
 
         <script type="text/x-template" id="search-results-screen-template">
             <div class="root">
-              <div v-if="richContentEnabled" class="topbar topbar-home">
+              <div class="topbar topbar-home">
                   <a class="home-logo-link" href="/" @click.prevent="goHome()">
                     <img class="home-logo" src="/lib/rapidbay-logo.png" alt="RapidBay">
                   </a>
@@ -251,28 +197,10 @@
                     <input type="text" class="form-control" v-model="query" autocorrect="off" autocapitalize="none" placeholder="Search">
                   </form>
               </div>
-              <div v-else class="topbar">
-                      <button @click="back()" class="btn btn-dark backarrow" aria-label="Back" title="Back">
-                        <div class="icon back_icon"/>
-                      </button>
-                      <button v-if="searchterm === '[history]'" @click="onClearHistory()" class="btn btn-dark topbar-center-btn" aria-label="Clear history" title="Clear history">
-                          <div class="icon history_icon"/>
-                      </button>
-                      <div v-else-if="searchterm === '[favorites]'">
-                          <div class="icon favorites_icon" style="display:inline-block;vertical-align:middle;"/>
-                      </div>
-                      <div v-else-if="searchterm" class="search-results-title">
-                          &#128270;
-                          {{ searchterm }}
-                      </div>
-                      <div v-else>
-                          <div class="icon trending_icon" style="display:inline-block;vertical-align:middle;"/>
-                      </div>
-              </div>
-              <h1 v-if="richContentEnabled && pageHeading" class="results-heading">{{ pageHeading }}</h1>
+<h1 v-if="pageHeading" class="results-heading">{{ pageHeading }}</h1>
               <loading-spinner v-if="results === null"/>
               <div v-else class="tablewrapper">
-                  <div v-if="(richContentEnabled || pinnedTitle) && groups.length > 0" class="rich-results-content">
+                  <div v-if="groups.length > 0" class="rich-results-content">
                       <div class="grouped-results">
                           <section v-for="group in groups" :key="group.tmdb_id || group.title" class="group-card" :class="{ 'group-card-backed': group.backdrop_url, 'group-card-collapsed': !isGroupOpen(group) }" :data-group-key="groupOpenKey(group)" :tabindex="isGroupOpen(group) ? -1 : 0" @click="openGroup(group, $event)">
                               <div v-if="group.backdrop_url" class="group-backdrop" :style="{ backgroundImage: 'url(' + JSON.stringify(group.backdrop_url) + ')' }"></div>
@@ -396,7 +324,7 @@
                               v-for="result in flatResults"
                               @click="onResultClick(result)"
                               >
-                                  <td :title="result.seeds ? (result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')) : ''"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ result.title }}<span v-if="richContentEnabled && result.seeds" class="result-seeds">{{ result.seeds }} seeds</span><span v-if="richContentEnabled && result.size" class="result-size">{{ formatSize(result.size) }}</span></td>
+                                  <td :title="result.seeds ? (result.seeds + (result.seeds > 1 ? ' Seeders': ' Seeder')) : ''"><span v-if="result.status === 'downloaded'">&#x25CF; </span><span v-else-if="result.status === 'downloading'">&#x25CB; </span>{{ result.title }}<span v-if="result.seeds" class="result-seeds">{{ result.seeds }} seeds</span><span v-if="result.size" class="result-size">{{ formatSize(result.size) }}</span></td>
                               </tr>
                           </tbody>
                       </table>
@@ -460,33 +388,14 @@
                       :progress="progress"
                   />
                   <div v-if="streamMessage" class="stream-message">{{streamMessage}}</div>
+                  <button v-if="canCancel" type="button" class="btn btn-outline-light cancel-download" :disabled="cancelling" @click="cancelDownload()">Cancel download</button>
               </div>
             </div>
         </script>
 
         <script type="text/x-template" id="player-template">
-                 <div class="video_wrapper" :class="{ 'controls-hidden': richContentEnabled && !controlsOn }">
-                   <div class="topbar topbar-flex" v-if="!richContentEnabled && hovering">
-                       <button @click="back()" class="btn btn-dark backarrow" aria-label="Back" title="Back">
-                         <div class="icon back_icon"/>
-                       </button>
-                       <div class="filename-truncate">
-                           <a tabindex="-1" :href="fileLink" class="video_url">
-                               {{decodeURIComponent(url.split("/").pop())}}
-                           </a>
-                       </div>
-                       <span v-if="downloadProgress !== null && downloadProgress < 1" class="download-progress-badge">
-                           {{Math.round(downloadProgress * 100)}}%
-                           <span v-if="downloadStatusLabel" class="download-progress-tooltip">{{downloadStatusLabel}}</span>
-                       </span>
-                       <div class="buttons" v-if="supported">
-                           <chromecast-button v-if="url && isDesktop && isChrome" :video-url="url" :media-title="decodeURIComponent(url.split('?')[0].split('/').pop())"/>
-                           <caption-button v-if="url"/>
-                           <favorite-button :magnet="magnet" :filename="filename"/>
-                           <fullscreen-button/>
-                       </div>
-                   </div>
-                   <div class="topbar topbar-flex player-top" v-if="richContentEnabled" v-show="controlsOn">
+                 <div class="video_wrapper" :class="{ 'controls-hidden': !controlsOn }">
+                   <div class="topbar topbar-flex player-top" v-show="controlsOn">
                        <button @click="back()" class="btn btn-dark backarrow" aria-label="Back">
                          <div class="icon back_icon"/>
                        </button>
@@ -502,8 +411,6 @@
                    <video
                 poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
                 disablepictureinpicture
-                :controls="!richContentEnabled"
-                :controlslist="richContentEnabled ? null : 'nodownload noplaybackrate'"
                 v-if="supported && url" autoplay playsinline tabindex="0"
                 @click="onVideoClick"
             >
@@ -514,7 +421,7 @@
                            :id="subtitle.url"
                        >
                    </video>
-                   <div class="player-controls" v-if="richContentEnabled" v-show="controlsOn && supported" @click.stop>
+                   <div class="player-controls" v-show="controlsOn && supported" @click.stop>
                        <div class="player-progress">
                            <input class="player-scrub" type="range" min="0" max="1000" :value="scrubValue" :style="{ '--progress': progressPercent }" @input="onScrub" aria-label="Seek">
                            <span class="player-remaining">{{ remainingLabel }}</span>

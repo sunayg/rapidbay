@@ -66,7 +66,7 @@
 
     function homeFocusTargets() {
         return Array.prototype.filter.call(
-            document.querySelectorAll(".form-control, .rich-switch, .billboard-card, .poster-card, .home-basic-item, .search-chip, .search-history-item, .search-history-clear, .home-shortcut"),
+            document.querySelectorAll(".form-control, .billboard-card, .poster-card, .search-chip, .search-history-clear, .home-shortcut"),
             function (el) {
                 if (el.disabled) {
                     return false;
@@ -328,7 +328,7 @@
         if (!document.cookie) {
             document.cookie = storageGet("cookie");
         }
-        $.post(url, data, callback);
+        return $.post(url, data, callback);
     }
 
     // Subscribe to a server-sent-events endpoint. Calls callback per event,
@@ -357,18 +357,8 @@
         return es;
     }
 
-    // Rich Content is opt-in. With it off, nothing is sent to the library or
-    // charts endpoints and the home, search and player screens stay classic.
-    function richContentOn() {
-        try {
-            return storageGet("richContentEnabled") === "true";
-        } catch (error) {
-            return false;
-        }
-    }
-
     function reportLibraryEvents(events, onSuccess) {
-        if (!events || !events.length || !richContentOn()) {
+        if (!events || !events.length) {
             return;
         }
         if (!document.cookie) {
@@ -384,7 +374,7 @@
     }
 
     function syncLibraryFromLocalHistory() {
-        if (!richContentOn() || window.sessionStorage.getItem("rapidbayLibrarySync")) {
+        if (window.sessionStorage.getItem("rapidbayLibrarySync")) {
             return;
         }
         var events = [];
@@ -1216,7 +1206,6 @@
                         navigator.userAgent
                     ),
                 isChrome: window.isChrome,
-                richContentEnabled: richContentOn(),
                 hovering: false,
                 openMenu: "",
                 paused: false,
@@ -1370,10 +1359,7 @@
                 this.muted = video.muted || video.volume === 0;
             },
             onVideoClick: function () {
-                // Classic playback keeps the browser's own controls and click handling.
-                if (this.richContentEnabled) {
-                    this.togglePlay();
-                }
+                this.togglePlay();
             },
             togglePlay: function () {
                 this.openMenu = "";
@@ -1744,7 +1730,7 @@
             },
             placeCues: function (raised) {
                 var video = this.videoEl();
-                if (!video || !this.richContentEnabled) {
+                if (!video) {
                     return;
                 }
                 for (var i = 0; i < video.textTracks.length; i++) {
@@ -2587,7 +2573,6 @@
             return {
                 searchterm: "",
                 searchHistory: [],
-                richContentEnabled: storageGet("richContentEnabled") === "true",
                 keepWatching: [],
                 recentTitles: [],
                 topSeries: [],
@@ -2597,20 +2582,8 @@
             };
         },
         methods: {
-            setRichContent: function (value) {
-                this.richContentEnabled = !!value;
-                this.onRichToggle();
-            },
-            onRichToggle: function () {
-                storageSet("richContentEnabled", this.richContentEnabled ? "true" : "false");
-                this.applyPageBackground();
-                if (this.richContentEnabled) {
-                    syncLibraryFromLocalHistory();
-                    this.loadHome();
-                }
-            },
             applyPageBackground: function () {
-                var color = this.richContentEnabled ? "#141414" : "#000";
+                var color = "#141414";
                 document.documentElement.style.backgroundColor = color;
                 document.body.style.backgroundColor = color;
             },
@@ -2770,10 +2743,8 @@
         mounted: function () {
             this.applyPageBackground();
             this.searchHistory = getSearchHistory();
-            if (this.richContentEnabled) {
-                syncLibraryFromLocalHistory();
-                this.loadHome();
-            }
+            syncLibraryFromLocalHistory();
+            this.loadHome();
             var self = this;
             this.onHomeResize = function () {
                 self.refreshRails();
@@ -2798,53 +2769,19 @@
                     var code = e.keyCode || e.which;
                     if (code === 13) lowername = "enter";
                 }
-                var isTopbarButton = document.activeElement && (document.activeElement.classList.contains("home-shortcut") || !!document.activeElement.closest(".topbar-classic"));
-                var isHistoryItem = document.activeElement && (document.activeElement.classList.contains("search-chip") || document.activeElement.classList.contains("search-history-item"));
-                var isRecentItem = document.activeElement && (document.activeElement.classList.contains("billboard-card") || document.activeElement.classList.contains("poster-card") || document.activeElement.classList.contains("home-basic-item") || document.activeElement.classList.contains("search-chip") || document.activeElement.classList.contains("search-history-item") || document.activeElement.classList.contains("search-history-clear") || document.activeElement.classList.contains("home-shortcut") || document.activeElement.classList.contains("row-nudge"));
-                var isSearchInput = document.activeElement && document.activeElement.classList.contains("form-control");
-                var spatial = !!document.querySelector(".home-root");
-                if (lowername === "enter" && !isSearchInput && (isTopbarButton || isHistoryItem || isRecentItem)) {
+                var active = document.activeElement;
+                var isActionable = active && (active.classList.contains("home-shortcut") || active.classList.contains("billboard-card") || active.classList.contains("poster-card") || active.classList.contains("search-chip") || active.classList.contains("search-history-clear") || active.classList.contains("row-nudge"));
+                var isSearchInput = active && active.classList.contains("form-control");
+                if (lowername === "enter" && !isSearchInput && isActionable) {
                     e.preventDefault();
-                    document.activeElement.click();
-                } else if (spatial && (lowername === "arrowdown" || lowername === "arrowup" || ((lowername === "arrowleft" || lowername === "arrowright") && !isSearchInput))) {
+                    active.click();
+                } else if (lowername === "arrowdown" || lowername === "arrowup" || ((lowername === "arrowleft" || lowername === "arrowright") && !isSearchInput)) {
                     e.preventDefault();
                     e.stopPropagation();
                     if (e.stopImmediatePropagation) {
                         e.stopImmediatePropagation();
                     }
                     focusByDirection(lowername.replace("arrow", ""));
-                } else if (lowername === "arrowdown") {
-                    // Classic home: same keys as before Rich Content existed.
-                    e.preventDefault();
-                    if (isSearchInput) {
-                        var firstItem = document.querySelector(".search-history-item");
-                        if (firstItem) {
-                            firstItem.focus();
-                        }
-                    } else if (isHistoryItem) {
-                        focusNextElement();
-                    } else {
-                        $("input.form-control").focus().click();
-                    }
-                } else if (lowername === "arrowup") {
-                    e.preventDefault();
-                    if (isHistoryItem) {
-                        var items = document.querySelectorAll(".search-history-item");
-                        var idx = Array.prototype.indexOf.call(items, document.activeElement);
-                        if (idx === 0) {
-                            $("input.form-control").focus().click();
-                        } else {
-                            focusPrevElement();
-                        }
-                    } else if (!isTopbarButton) {
-                        $(".topbar-classic button:first").focus();
-                    }
-                } else if (lowername === "arrowright" && !isSearchInput) {
-                    e.preventDefault();
-                    focusNextElement();
-                } else if (lowername === "arrowleft" && !isSearchInput) {
-                    e.preventDefault();
-                    focusPrevElement();
                 }
             };
 
@@ -2948,7 +2885,6 @@
                 results: null,
                 searchterm: "",
                 query: "",
-                richContentEnabled: storageGet("richContentEnabled") === "true",
                 groups: [],
                 other: [],
                 openEpisodes: {},
@@ -3261,9 +3197,6 @@
             },
             loadLibrary: function () {
                 var self = this;
-                if (!this.richContentEnabled && !this.pinnedTitle) {
-                    return;
-                }
                 self.libraryTitles = readLocalTitles();
                 fetchWatchRows(function () {
                     self.libraryTitles = readLocalTitles();
@@ -3615,7 +3548,6 @@
                     this.focusFirstResult();
                     return;
                 }
-                this.richContentEnabled = false;
                 this.startFlatSearch();
             },
             loadBlockingRichSearch: function () {
@@ -3648,7 +3580,6 @@
                     if (self.results !== null) {
                         return;
                     }
-                    self.richContentEnabled = false;
                     self.startFlatSearch();
                 });
             },
@@ -3754,7 +3685,7 @@
         template: "#search-results-screen-template",
         computed: {
             // Rich search keeps its ungrouped hits in `other` and parks `results`
-            // as an empty list; history, favorites, trending and classic search
+            // as an empty list; history, favorites, trending and the plain-search fallback
             // fill `results` and leave `other` empty.
             flatResults: function () {
                 return this.results && this.results.length ? this.results : this.other;
@@ -3826,10 +3757,8 @@
                 this.results = getFavorites();
                 fetchAndApplyStatus(this.results);
                 this.focusFirstResult();
-            } else if (this.richContentEnabled || this.pinnedTitle) {
-                this.loadRichSearch();
             } else {
-                this.startFlatSearch();
+                this.loadRichSearch();
             }
             syncLibraryFromLocalHistory();
             this.loadLibrary();
@@ -4020,10 +3949,28 @@
                 canStream: false,
                 streamRequested: false,
                 hlsFailed: false,
-                streamMessage: null
+                streamMessage: null,
+                cancelling: false
             };
         },
+        computed: {
+            // Once the file is converting or playable the work is done; only the
+            // torrent phase can be called off.
+            canCancel: function () {
+                return !!this.status && ["ready", "finishing_up", "converting"].indexOf(this.status) === -1;
+            },
+        },
         methods: {
+            cancelDownload: function () {
+                this.cancelling = true;
+                var self = this;
+                post(
+                    "/api/magnet/" + get_hash(this.params.magnet_link) + "/" + encodeURIComponent(this.params.filename) + "/cancel",
+                    {}
+                ).always(function () {
+                    self.back();
+                });
+            },
             preventchange: function (e) {
                 e.preventDefault();
                 e.target.value = window.location.origin + this.play_link;

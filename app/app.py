@@ -1238,6 +1238,12 @@ def magnet_download(
     return {"magnet_hash": magnet_hash}
 
 
+@app.post("/api/magnet/{magnet_hash}/{filename}/cancel", response_model=MagnetHashResponse)
+def cancel_download(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, str]:
+    daemon.cancel_download(magnet_hash, filename)
+    return {"magnet_hash": magnet_hash}
+
+
 @app.post("/api/magnet/{magnet_hash}/{filename}/stream")
 def start_stream(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
     return daemon.start_hls_stream(magnet_hash, filename)
