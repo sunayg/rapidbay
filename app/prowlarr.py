@@ -11,8 +11,12 @@ import torrent
 from common import memoize, should_drop_from_trending, size_bytes
 from dateutil.parser import parse
 
-API_PATH = f"{settings.PROWLARR_HOST}/api/v1"
-API_KEY = settings.PROWLARR_API_KEY
+def _api_path() -> str:
+    return f"{settings.PROWLARR_HOST}/api/v1"
+
+
+def _api_key() -> str:
+    return settings.PROWLARR_API_KEY
 
 
 def _extract_magnet(result: Dict[str, Any]) -> str | None:
@@ -50,8 +54,8 @@ def _extract_torrent_link(result: Dict[str, Any]) -> str | None:
 @memoize(3600)
 def get_indexer_ids() -> List[int]:
     resp = requests.get(
-        f"{API_PATH}/indexer",
-        headers={"X-Api-Key": API_KEY},
+        f"{_api_path()}/indexer",
+        headers={"X-Api-Key": _api_key()},
         timeout=10,
     )
     resp.raise_for_status()
@@ -73,7 +77,7 @@ async def fetch_json(session: aiohttp.ClientSession, url: str) -> List[Dict[str,
 async def fetch_all(urls: List[str]) -> List[List[Dict[str, Any]]]:
     async with aiohttp.ClientSession(
         timeout=aiohttp.ClientTimeout(total=5),
-        headers={"X-Api-Key": API_KEY},
+        headers={"X-Api-Key": _api_key()},
     ) as session:
         tasks = [asyncio.ensure_future(fetch_json(session, url)) for url in urls]
         return await asyncio.gather(*tasks)
@@ -81,7 +85,7 @@ async def fetch_all(urls: List[str]) -> List[List[Dict[str, Any]]]:
 
 def _build_urls(searchterm: str) -> List[str]:
     return [
-        f"{API_PATH}/search?{urlencode({'query': searchterm, 'type': 'search', 'limit': 100, 'indexerIds': iid})}"
+        f"{_api_path()}/search?{urlencode({'query': searchterm, 'type': 'search', 'limit': 100, 'indexerIds': iid})}"
         for iid in get_indexer_ids()
     ]
 
@@ -173,7 +177,7 @@ async def search_stream(
         urls = await asyncio.to_thread(_build_urls, searchterm)
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=5),
-            headers={"X-Api-Key": API_KEY},
+            headers={"X-Api-Key": _api_key()},
         ) as session:
             tasks = [asyncio.ensure_future(fetch_json(session, url)) for url in urls]
             for task in asyncio.as_completed(tasks):

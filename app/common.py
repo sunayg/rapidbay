@@ -24,16 +24,17 @@ _NON_LATIN_RE: Pattern[str] = re.compile(
     + "＀-￯"        # Halfwidth and Fullwidth Forms
     + "]"
 )
-_blocklist_re: Pattern[str] | None = None
+_blocklist_cache: tuple[tuple[str, ...], Pattern[str] | None] = ((), None)
 
 
 def _get_trending_title_blocklist_re() -> Pattern[str] | None:
-    global _blocklist_re
-    if _blocklist_re is None and settings.TRENDING_TITLE_BLOCKLIST:
-        _blocklist_re = re.compile(
-            "|".join(settings.TRENDING_TITLE_BLOCKLIST), re.IGNORECASE
-        )
-    return _blocklist_re
+    """Compiled blocklist, rebuilt whenever the setting changes at runtime."""
+    global _blocklist_cache
+    patterns = tuple(settings.TRENDING_TITLE_BLOCKLIST)
+    if _blocklist_cache[0] != patterns:
+        compiled = re.compile("|".join(patterns), re.IGNORECASE) if patterns else None
+        _blocklist_cache = (patterns, compiled)
+    return _blocklist_cache[1]
 
 
 def size_bytes(value: Any) -> int | None:
@@ -98,6 +99,18 @@ def path_hierarchy(path: str) -> Dict[str, List[Any]] | List[Any] | str:
 def normalize_filename(s: str) -> str:
     """Normalize filename to ASCII alphanumerics for matching, preserving path separators and periods."""
     return "".join(c for c in s if (c.isalnum() and c.isascii()) or c in "/\\.")
+
+
+def clear_memoized(module_name: str) -> int:
+    """Drop cached memoize() results for functions defined in `module_name`."""
+    cache = diskcache.Cache(settings.CACHE_DIR)
+    try:
+        stale = [k for k in cache.iterkeys() if isinstance(k, tuple) and k and k[0] == module_name]
+        for k in stale:
+            del cache[k]
+        return len(stale)
+    finally:
+        cache.close()
 
 
 def memoize(expire: int = 300) -> Callable[[Callable[..., Any]], Callable[..., Any]]:

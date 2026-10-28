@@ -124,7 +124,17 @@ def _commit(mod: types.ModuleType, coerced: dict[str, Any]) -> list[str]:
     for key, value in coerced.items():
         if not FIELDS[key].restart_needed:
             setattr(mod, key, value)
+    _after_change(changed)
     return changed
+
+
+def _after_change(keys: list[str]) -> None:
+    """Drop cached search results that were fetched from a previous indexer."""
+    from common import clear_memoized
+
+    for host_key, _ in HOST_KEY_PAIRS:
+        if host_key in keys:
+            clear_memoized(host_key.split("_")[0].lower())
 
 
 def _field(key: str) -> Field:
@@ -141,6 +151,7 @@ def reset_field(key: str) -> list[str]:
     _write(saved)
     if not field.restart_needed:
         setattr(mod, key, mod._ENV_VALUES.get(key, mod._DEFAULTS[key]))
+    _after_change([key])
     return [key]
 
 

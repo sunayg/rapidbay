@@ -10,6 +10,7 @@ from settings_schema import FIELDS
 
 @pytest.fixture
 def store(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(settings, "LIBRARY_PATH", str(tmp_path / "library.json"))
     for key in FIELDS:
         monkeypatch.setattr(settings, key, getattr(settings, key))

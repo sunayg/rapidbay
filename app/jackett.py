@@ -11,8 +11,12 @@ import torrent
 from common import memoize, should_drop_from_trending, size_bytes
 from dateutil.parser import parse
 
-API_PATH = f"{settings.JACKETT_HOST}/api/v2.0"
-API_KEY = settings.JACKETT_API_KEY
+def _api_path() -> str:
+    return f"{settings.JACKETT_HOST}/api/v2.0"
+
+
+def _api_key() -> str:
+    return settings.JACKETT_API_KEY
 
 
 @memoize(3600)
@@ -25,7 +29,7 @@ def get_indexers() -> List[str]:
     session = requests.Session()
 
     indexers_resp = session.get(
-        f"{API_PATH}/indexers/all/results?apikey={API_KEY}"
+        f"{_api_path()}/indexers/all/results?apikey={_api_key()}"
     )
     indexers_json = indexers_resp.json()["Indexers"]
     return [i.get("ID") for i in indexers_json]
@@ -51,7 +55,7 @@ async def fetch_all(urls: List[str]) -> List[Dict[str, Any]]:
 
 def _build_urls(searchterm: str) -> List[str]:
     return [
-        f"{API_PATH}/indexers/{indexer}/results?apikey={API_KEY}&Query={searchterm}"
+        f"{_api_path()}/indexers/{indexer}/results?apikey={_api_key()}&Query={searchterm}"
         for indexer in get_indexers()
     ]
 
