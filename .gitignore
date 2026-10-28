@@ -15,3 +15,5 @@ pyrightconfig.json
 .jackett/
 RapidBay.egg-info/
 *.sock
+.env.vpn
+.prowlarr/

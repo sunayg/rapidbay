@@ -1,0 +1,42 @@
+# Local test stack: RapidBay + Prowlarr, both routed through ExpressVPN via gluetun
+# (so searches and torrent traffic all leave through the VPN).
+# Usage: docker compose -f docker-compose.local.yml --env-file .env --env-file .env.vpn up --build
+services:
+    gluetun:
+        image: qmcgaw/gluetun
+        cap_add:
+            - NET_ADMIN
+        devices:
+            - /dev/net/tun:/dev/net/tun
+        environment:
+            VPN_SERVICE_PROVIDER: expressvpn
+            OPENVPN_USER: ${OPENVPN_USER}
+            OPENVPN_PASSWORD: ${OPENVPN_PASSWORD}
+            SERVER_COUNTRIES: ${SERVER_COUNTRIES:-Netherlands}
+        ports:
+            - "9696:9696" # Prowlarr UI (shares gluetun's network)
+            - "5000:5000" # RapidBay UI (shares gluetun's network)
+        restart: unless-stopped
+
+    prowlarr:
+        image: linuxserver/prowlarr
+        network_mode: "service:gluetun"
+        depends_on:
+            - gluetun
+        volumes:
+            - ./.prowlarr:/config
+
+    rapidbay:
+        build: .
+        network_mode: "service:gluetun"
+        env_file:
+            - .env
+        environment:
+            LIBRARY_PATH: /data/library.json
+            PROWLARR_HOST: http://localhost:9696
+            PROWLARR_API_KEY: ${PROWLARR_API_KEY}
+        volumes:
+            - ./app:/app
+            - ./data:/data
+        depends_on:
+            - prowlarr
