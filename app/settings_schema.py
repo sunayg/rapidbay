@@ -1,0 +1,216 @@
+"""Describes every editable setting: its type, limits and how it is validated.
+
+Values cross the API in a "wire" form (plain JSON); `coerce` turns a wire
+value into the Python type `settings.py` uses and `to_wire` goes back.
+"""
+
+import re
+from dataclasses import dataclass
+from typing import Any, Literal
+from urllib.parse import urlparse
+
+Kind = Literal[
+    "bool", "int", "str", "url", "bitrate", "str_list", "int_list", "host_port_list", "regex_list", "codec_preset"
+]
+
+CODECS = ("libx264", "libx265", "copy")
+PRESETS = ("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow")
+
+MAX_LIST_ITEMS = 50
+MAX_ITEM_LENGTH = 200
+
+
+class ValidationError(Exception):
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+@dataclass(frozen=True)
+class Field:
+    key: str
+    category: str
+    kind: Kind
+    label: str
+    help: str = ""
+    secret: bool = False
+    restart_needed: bool = False
+    nullable: bool = False
+    min: int | None = None
+    max: int | None = None
+
+
+CATEGORIES: list[tuple[str, str]] = [
+    ("search", "Search"),
+    ("torrents", "Torrents"),
+    ("streaming", "Streaming"),
+    ("conversion", "Conversion"),
+    ("subtitles", "Subtitles and metadata"),
+    ("trending", "Trending"),
+    ("general", "General"),
+]
+
+
+def _f(key: str, category: str, kind: Kind, label: str, **kw: Any) -> tuple[str, Field]:
+    return key, Field(key, category, kind, label, **kw)
+
+
+FIELDS: dict[str, Field] = dict(
+    [
+        _f("JACKETT_HOST", "search", "url", "Jackett host", help="Changing it clears the Jackett API key unless you set a new one."),
+        _f("JACKETT_API_KEY", "search", "str", "Jackett API key", secret=True),
+        _f("PROWLARR_HOST", "search", "url", "Prowlarr host", help="Changing it clears the Prowlarr API key unless you set a new one."),
+        _f("PROWLARR_API_KEY", "search", "str", "Prowlarr API key", secret=True),
+        _f("MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS", "search", "str_list", "Move results containing to bottom", help="One per line."),
+        _f("TORRENT_LISTENING_PORT", "torrents", "int", "Listening port", restart_needed=True, nullable=True, min=1, max=65535),
+        _f("DHT_ROUTERS", "torrents", "host_port_list", "DHT routers", restart_needed=True, help="One host:port per line."),
+        _f("MAX_TORRENT_AGE_HOURS", "torrents", "int", "Max torrent age (hours)", min=1),
+        _f("TORRENT_DOWNLOAD_LIMIT", "torrents", "int", "Download limit (bytes/s, -1 = none)", help="Applies to torrents added after the change.", min=-1),
+        _f("TORRENT_UPLOAD_LIMIT", "torrents", "int", "Upload limit (bytes/s, -1 = none)", help="Applies to torrents added after the change.", min=-1),
+        _f("SUPPORTED_EXTENSIONS", "torrents", "str_list", "Supported extensions", help="One per line."),
+        _f("MAX_OUTPUT_FILE_AGE", "torrents", "int", "Max output file age (hours)", min=1),
+        _f("HLS_STREAMING", "streaming", "bool", "HLS streaming while downloading"),
+        _f("HLS_SEGMENT_DURATION", "streaming", "int", "Segment duration (seconds)", min=1),
+        _f("HLS_START_THRESHOLD", "streaming", "int", "Start threshold (bytes)", min=1),
+        _f("MAX_PARALLEL_HLS_STREAMS", "streaming", "int", "Max parallel HLS streams", min=1),
+        _f("HLS_STALL_TIMEOUT", "streaming", "int", "Stall timeout (seconds)", min=1),
+        _f("HLS_VIEWER_TIMEOUT", "streaming", "int", "Viewer timeout (seconds)", min=1),
+        _f("HLS_PREFETCH_BYTES", "streaming", "int", "Prefetch window (bytes)", min=1),
+        _f("CONVERT_VIDEO", "conversion", "bool", "Convert video"),
+        _f("VIDEO_CONVERSION_PARAMS", "conversion", "codec_preset", "Video codec and preset"),
+        _f("AAC_BITRATE", "conversion", "bitrate", "AAC bitrate", help="For example 256k."),
+        _f("AAC_CHANNELS", "conversion", "int", "AAC channels", min=1, max=8),
+        _f("MAX_PARALLEL_CONVERSIONS", "conversion", "int", "Max parallel conversions", min=1),
+        _f("VIDEO_EXTENSIONS", "conversion", "str_list", "Video extensions", help="One per line."),
+        _f("SUBTITLE_LANGUAGES", "subtitles", "str_list", "Subtitle languages", help="One per line, for example en."),
+        _f("OPENSUBTITLES_USERNAME", "subtitles", "str", "OpenSubtitles username"),
+        _f("OPENSUBTITLES_PASSWORD", "subtitles", "str", "OpenSubtitles password", secret=True),
+        _f("TMDB_API_KEY", "subtitles", "str", "TMDB API key", secret=True),
+        _f("EXCLUDE_TRACKERS_FROM_TRENDING", "trending", "str_list", "Exclude trackers", help="One per line."),
+        _f("EXCLUDE_CATEGORIES_FROM_TRENDING", "trending", "int_list", "Exclude categories", help="One number per line."),
+        _f("TRENDING_TITLE_BLOCKLIST", "trending", "regex_list", "Title blocklist (regex)", help="One regular expression per line."),
+        _f("TRENDING_BLOCK_NON_LATIN_TITLES", "trending", "bool", "Block non-Latin titles"),
+        _f("AUTO_PLAY_NEXT_FILE", "general", "bool", "Auto-play next file"),
+        _f("PASSWORD", "general", "str", "Password", secret=True, help="Leave empty for open access."),
+    ]
+)
+
+_BITRATE_RE = re.compile(r"^\d+k?$")
+_PASSWORD_RE = re.compile(r"^[!#-+\--:<-\[\]-~]{1,128}$")  # printable ASCII except space " , ; \
+
+
+def _clean_list(field: Field, wire: Any) -> list[str]:
+    if not isinstance(wire, list):
+        raise ValidationError(f"{field.label}: expected a list")
+    out: list[str] = []
+    for item in wire:
+        if not isinstance(item, str):
+            raise ValidationError(f"{field.label}: items must be text")
+        item = item.strip()
+        if item and item not in out:
+            out.append(item)
+    if len(out) > MAX_LIST_ITEMS:
+        raise ValidationError(f"{field.label}: at most {MAX_LIST_ITEMS} entries")
+    for item in out:
+        if len(item) > MAX_ITEM_LENGTH:
+            raise ValidationError(f"{field.label}: entries are limited to {MAX_ITEM_LENGTH} characters")
+    return out
+
+
+def _int(field: Field, wire: Any) -> int | None:
+    if wire is None and field.nullable:
+        return None
+    if isinstance(wire, bool) or not isinstance(wire, int):
+        if isinstance(wire, str) and re.fullmatch(r"-?\d+", wire.strip()):
+            wire = int(wire)
+        else:
+            raise ValidationError(f"{field.label}: expected a whole number")
+    if field.min is not None and wire < field.min:
+        raise ValidationError(f"{field.label}: must be at least {field.min}")
+    if field.max is not None and wire > field.max:
+        raise ValidationError(f"{field.label}: must be at most {field.max}")
+    return wire
+
+
+def build_conversion_params(codec: str, preset: str | None) -> str:
+    if codec not in CODECS:
+        raise ValidationError(f"Codec must be one of: {', '.join(CODECS)}")
+    if codec == "copy":
+        return "copy"
+    if preset not in PRESETS:
+        raise ValidationError(f"Preset must be one of: {', '.join(PRESETS)}")
+    return f"{codec} -preset {preset}"
+
+
+def coerce(field: Field, wire: Any) -> Any:
+    kind = field.kind
+    if kind == "bool":
+        if not isinstance(wire, bool):
+            raise ValidationError(f"{field.label}: expected on or off")
+        return wire
+    if kind == "int":
+        return _int(field, wire)
+    if kind in ("str", "url", "bitrate"):
+        if not isinstance(wire, str):
+            raise ValidationError(f"{field.label}: expected text")
+        value = wire.strip()
+        if field.key == "PASSWORD":
+            if value and not _PASSWORD_RE.match(wire):
+                raise ValidationError("Password must be 1-128 printable ASCII characters without spaces, quotes, commas, semicolons or backslashes")
+            return wire
+        if kind == "url":
+            if not value:
+                return ""
+            parsed = urlparse(value)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                raise ValidationError(f"{field.label}: must be an http or https URL")
+            return value.rstrip("/")
+        if kind == "bitrate" and not _BITRATE_RE.match(value):
+            raise ValidationError(f"{field.label}: use digits with an optional k, for example 256k")
+        return value
+    if kind == "codec_preset":
+        if not isinstance(wire, dict):
+            raise ValidationError(f"{field.label}: choose a codec and preset")
+        return build_conversion_params(str(wire.get("codec")), wire.get("preset"))
+    items = _clean_list(field, wire)
+    if kind == "str_list":
+        return items
+    if kind == "int_list":
+        out: list[int] = []
+        for item in items:
+            if not re.fullmatch(r"-?\d+", item):
+                raise ValidationError(f"{field.label}: '{item}' is not a whole number")
+            out.append(int(item))
+        return out
+    if kind == "host_port_list":
+        routers: list[tuple[str, int]] = []
+        for item in items:
+            host, _, port = item.rpartition(":")
+            if not host or not port.isdigit() or not 1 <= int(port) <= 65535 or re.search(r"\s", host):
+                raise ValidationError(f"{field.label}: '{item}' is not host:port")
+            routers.append((host, int(port)))
+        return routers
+    for item in items:  # regex_list
+        try:
+            re.compile(item)
+        except re.error as e:
+            raise ValidationError(f"{field.label}: '{item}' is not a valid pattern ({e})") from e
+    return items
+
+
+def to_wire(field: Field, value: Any) -> Any:
+    kind = field.kind
+    if kind == "host_port_list":
+        return [f"{h}:{p}" for h, p in value]
+    if kind == "int_list":
+        return [str(v) for v in value]
+    if kind == "str_list" or kind == "regex_list":
+        return list(value)
+    if kind == "codec_preset":
+        parts = str(value).split()
+        if parts == ["copy"]:
+            return {"codec": "copy", "preset": None}
+        if len(parts) == 3 and parts[1] == "-preset" and parts[0] in CODECS and parts[2] in PRESETS:
+            return {"codec": parts[0], "preset": parts[2]}
+        return None
+    return value
