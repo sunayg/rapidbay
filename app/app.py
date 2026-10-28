@@ -1492,6 +1492,28 @@ def cast_play(token: str, magnet_hash: str, filename: str) -> Response:
     return _serve_output_file(magnet_hash, filename)
 
 
+def _v2_entry(password: str | None) -> Response:
+    """Vue app entry page, behind the same password gate as the old index.html."""
+    if settings.PASSWORD and password != settings.PASSWORD:
+        return _send_from_directory(settings.FRONTEND_DIR, "login.html", last_modified=datetime.datetime.now())
+    return _send_from_directory(settings.FRONTEND_V2_DIR, "index.html", last_modified=datetime.datetime.now())
+
+
+@app.get("/settings", include_in_schema=False)
+def settings_page(password: str | None = Cookie(default=None)) -> Response:
+    return _v2_entry(password)
+
+
+@app.get("/v2/{path:path}", include_in_schema=False)
+def frontend_v2(path: str, password: str | None = Cookie(default=None)) -> Response:
+    if path in ("", "index.html"):
+        return _v2_entry(password)
+    filepath = _resolve_within(settings.FRONTEND_V2_DIR, path)
+    if filepath and os.path.isfile(filepath):
+        return FileResponse(filepath)
+    raise HTTPException(status_code=404, detail="File not found")
+
+
 app.include_router(settings_api.build_router(authorize))
 
 
