@@ -1,7 +1,7 @@
 import os
 import re
 import threading
-from typing import Any, Callable, Dict, Iterable, List, Pattern
+from typing import Any, Callable, Dict, Iterable, List, Pattern, cast
 
 import diskcache
 import settings
@@ -103,9 +103,9 @@ def normalize_filename(s: str) -> str:
 
 def clear_memoized(module_name: str) -> int:
     """Drop cached memoize() results for functions defined in `module_name`."""
-    cache = diskcache.Cache(settings.CACHE_DIR)
+    cache = cast(Any, diskcache.Cache(settings.CACHE_DIR))
     try:
-        stale = [k for k in cache.iterkeys() if isinstance(k, tuple) and k and k[0] == module_name]
+        stale: list[Any] = [k for k in cache.iterkeys() if isinstance(k, tuple) and k and k[0] == module_name]
         for k in stale:
             del cache[k]
         return len(stale)

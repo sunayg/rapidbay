@@ -11,6 +11,7 @@ import torrent
 from common import memoize, should_drop_from_trending, size_bytes
 from dateutil.parser import parse
 
+
 def _api_path() -> str:
     return f"{settings.PROWLARR_HOST}/api/v1"
 

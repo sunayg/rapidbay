@@ -28,6 +28,7 @@ import requests
 import requests.adapters
 import requests.utils
 import settings
+import settings_api
 import torrent
 from common import path_hierarchy
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request, Response
@@ -1489,6 +1490,9 @@ def cast_play(token: str, magnet_hash: str, filename: str) -> Response:
     if not cast_access.verify_token(token, magnet_hash):
         raise HTTPException(status_code=404)
     return _serve_output_file(magnet_hash, filename)
+
+
+app.include_router(settings_api.build_router(authorize))
 
 
 # Catch-all route for frontend - MUST be defined last

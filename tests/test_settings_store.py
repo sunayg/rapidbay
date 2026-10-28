@@ -46,7 +46,7 @@ def test_reset_falls_back_to_env_then_default(store, monkeypatch):
     monkeypatch.setattr(settings, "_ENV_VALUES", {})
     settings_store.save_category("conversion", {"AAC_CHANNELS": 6})
     settings_store.reset_field("AAC_CHANNELS")
-    assert settings.AAC_CHANNELS == settings._DEFAULTS["AAC_CHANNELS"]
+    assert settings._DEFAULTS["AAC_CHANNELS"] == settings.AAC_CHANNELS
     row = next(f for f in settings_store.describe_all()["fields"] if f["key"] == "AAC_CHANNELS")
     assert row["source"] == "default"
 
@@ -77,7 +77,7 @@ def test_invalid_field_rejects_whole_category(store):
         settings_store.save_category("conversion", {"AAC_CHANNELS": 6, "AAC_BITRATE": "bad;"})
     assert list(exc.value.errors) == ["AAC_BITRATE"]
     assert not store.exists()
-    assert settings.AAC_CHANNELS == before
+    assert before == settings.AAC_CHANNELS
 
 
 def test_backup_and_atomic_write(store):

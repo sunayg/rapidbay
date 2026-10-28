@@ -6,7 +6,7 @@ value into the Python type `settings.py` uses and `to_wire` goes back.
 
 import re
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
 Kind = Literal[
@@ -103,7 +103,7 @@ def _clean_list(field: Field, wire: Any) -> list[str]:
     if not isinstance(wire, list):
         raise ValidationError(f"{field.label}: expected a list")
     out: list[str] = []
-    for item in wire:
+    for item in cast(list[Any], wire):
         if not isinstance(item, str):
             raise ValidationError(f"{field.label}: items must be text")
         item = item.strip()

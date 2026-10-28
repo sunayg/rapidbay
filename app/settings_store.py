@@ -9,7 +9,7 @@ import logging
 import os
 import shutil
 import types
-from typing import Any
+from typing import Any, cast
 
 from settings_schema import CATEGORIES, FIELDS, Field, ValidationError, coerce, to_wire
 
@@ -57,6 +57,7 @@ def load_saved(path: str | None = None) -> dict[str, Any]:
         values = data["values"]
         if not isinstance(values, dict):
             raise ValueError("values is not an object")
+        values = cast(dict[str, Any], values)
     except FileNotFoundError:
         return {}
     except Exception as e:
