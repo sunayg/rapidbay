@@ -1,4 +1,5 @@
 import contextlib
+import copy as _copy
 import os
 from typing import List, Tuple
 
@@ -16,6 +17,7 @@ _filelist_dir: str = ""
 _torrents_dir: str = ""
 _output_dir: str = ""
 _frontend_dir: str = "./app/frontend"
+_frontend_v2_dir: str = "./frontend/dist"
 _kodi_addon_dir: str = "./app/kodi.addon"
 
 # JACKETT
@@ -80,6 +82,11 @@ HLS_STALL_TIMEOUT: int = 180  # seconds without progress before an HLS stream is
 HLS_VIEWER_TIMEOUT: int = 300  # seconds without any client polling the file's status before an active HLS stream is stopped and its slot freed
 HLS_PREFETCH_BYTES: int = 32 * 1024 * 1024  # rolling deadline-rushed window the streamer keeps ahead of the pipe feeder
 
+# Built-in defaults and the values that came from the environment, kept so the
+# settings page can tell where a value comes from and reset it.
+_DEFAULTS = {_k: _copy.deepcopy(_v) for _k, _v in list(globals().items()) if _k.isupper() and not _k.startswith("_")}
+_ENV_VALUES: dict[str, object] = {}
+
 # Load environment variables
 for _variable in [item for item in list(globals().keys()) if not item.startswith("_")]:
     _NULL = "NULL"
@@ -88,6 +95,13 @@ for _variable in [item for item in list(globals().keys()) if not item.startswith
         with contextlib.suppress(Exception):
             _env_var = eval(_env_var)
         globals()[_variable] = _env_var
+        _ENV_VALUES[_variable] = _env_var
+
+# eval() above turns PASSWORD=1234 into an int that never matches the cookie.
+if PASSWORD is not None:
+    PASSWORD = str(PASSWORD)
+    if "PASSWORD" in _ENV_VALUES:
+        _ENV_VALUES["PASSWORD"] = PASSWORD
 
 # Load path overrides from environment
 _data_dir = os.getenv("DATA_DIR", _data_dir)
@@ -98,6 +112,7 @@ _filelist_dir = os.getenv("FILELIST_DIR", _filelist_dir)
 _torrents_dir = os.getenv("TORRENTS_DIR", _torrents_dir)
 _output_dir = os.getenv("OUTPUT_DIR", _output_dir)
 _frontend_dir = os.getenv("FRONTEND_DIR", _frontend_dir)
+_frontend_v2_dir = os.getenv("FRONTEND_V2_DIR", _frontend_v2_dir)
 _kodi_addon_dir = os.getenv("KODI_ADDON_DIR", _kodi_addon_dir)
 
 # Compute final path constants (assigned once)
@@ -111,4 +126,12 @@ FILELIST_DIR: str = _filelist_dir if _filelist_dir else os.path.join(_data_dir, 
 TORRENTS_DIR: str = _torrents_dir if _torrents_dir else os.path.join(_data_dir, "torrents") + "/"
 OUTPUT_DIR: str = _output_dir if _output_dir else os.path.join(_data_dir, "output") + "/"
 FRONTEND_DIR: str = _frontend_dir
+FRONTEND_V2_DIR: str = _frontend_v2_dir
 KODI_ADDON_DIR: str = _kodi_addon_dir
+
+# Saved values from the settings page win over the environment.
+import sys as _sys  # noqa: E402
+
+import settings_store as _settings_store  # noqa: E402
+
+_settings_store.apply_saved(_sys.modules[__name__])
