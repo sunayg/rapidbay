@@ -10,5 +10,11 @@ export default defineConfig({
     baseURL: process.env.BASE_URL || "http://localhost:5050",
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { browserName: "chromium" } }],
+  projects: [
+    {
+      name: "chromium",
+      // The player starts on its own; a real user would have clicked to get here.
+      use: { browserName: "chromium", launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] } },
+    },
+  ],
 });

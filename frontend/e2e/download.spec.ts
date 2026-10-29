@@ -126,7 +126,7 @@ test("a ready file hands over to the player with the MP4 link", async ({ page })
   await mockDownload(page, file, state);
   await page.goto(magnetUrl(file));
   await expect(page.locator('[data-screen="player-screen"]')).toBeVisible();
-  await expect(page.getByTestId("play-url")).toHaveText(`/play/${HASH}/Some.Show.S01E01.mp4`);
+  await expect(page.locator("video")).toHaveAttribute("src", new RegExp(`/play/${HASH}/Some\\.Show\\.S01E01\\.mp4$`));
 });
 
 test("errors are shown with a retry", async ({ page }) => {

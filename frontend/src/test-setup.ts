@@ -28,3 +28,14 @@ for (const name of ["localStorage", "sessionStorage"] as const) {
   Object.defineProperty(globalThis, name, { value: storage, configurable: true, writable: true });
   Object.defineProperty(window, name, { value: storage, configurable: true, writable: true });
 }
+
+// jsdom does not implement media playback; its stubs log "not implemented".
+// Tests that care install their own fake element behaviour.
+const mediaProto = (globalThis as unknown as { HTMLMediaElement?: { prototype: Record<string, unknown> } }).HTMLMediaElement?.prototype;
+if (mediaProto) {
+  mediaProto.play = function () {
+    return Promise.resolve();
+  };
+  mediaProto.pause = function () {};
+  mediaProto.load = function () {};
+}

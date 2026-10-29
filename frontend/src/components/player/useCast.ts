@@ -1,0 +1,124 @@
+// Chromecast support. chromecastjs and Google's cast sender script are plain
+// global scripts; they are injected only when a cast button will be shown, so
+// other browsers never fetch them. A script that fails to load (blocked,
+// offline) is not an error: the cast button just does not appear.
+import { get } from "../../lib/api";
+
+export interface CastSubtitle {
+  active: boolean;
+  src: string;
+  label: string;
+  srclang: string;
+}
+export interface CastMedia {
+  content: string;
+  title: string;
+  subtitles: CastSubtitle[];
+  time: number;
+  paused: boolean;
+  poster: null;
+  description: null;
+}
+export interface ChromecastLike {
+  cast(media: CastMedia, done: (problem: unknown) => void): void;
+}
+export type CastLoader = () => Promise<ChromecastLike | null>;
+
+const SENDER_SRC = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
+
+function localScript(): string {
+  return (import.meta.env.BASE_URL || "/") + "lib/chromecastjs.js";
+}
+
+function injectScript(src: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => {
+      script.remove();
+      resolve(false);
+    };
+    document.head.appendChild(script);
+  });
+}
+
+// One cast handle for the page: each ChromecastJS polls for the SDK and
+// registers its own player listeners, so it is made once and reused.
+let loading: Promise<ChromecastLike | null> | null = null;
+
+export function loadCast(): Promise<ChromecastLike | null> {
+  if (!loading) {
+    loading = (async () => {
+      const w = window as unknown as { ChromecastJS?: new () => ChromecastLike };
+      if (!w.ChromecastJS && !(await injectScript(localScript()))) return null;
+      if (!w.ChromecastJS) return null;
+      // The sender script is optional for loading; without it casting just
+      // reports "not available" when used.
+      void injectScript(SENDER_SRC);
+      return new w.ChromecastJS();
+    })();
+  }
+  return loading;
+}
+
+export function resetCastForTests(): void {
+  loading = null;
+}
+
+const LOCAL_HOST = /^(localhost|127(\.\d+){3}|\[?::1\]?)$/;
+
+export interface CastRequest {
+  videoUrl: string;
+  title: string;
+  video: HTMLVideoElement | null;
+  cc: ChromecastLike | null;
+}
+
+// Resolves to an error message to show, or null when the cast started.
+export async function castVideo(request: CastRequest): Promise<string | null> {
+  const { cc, video } = request;
+  if (!cc || !video) return "Chromecast is not available in this browser.";
+  if (LOCAL_HOST.test(window.location.hostname)) {
+    return "Open RapidBay by its network address to cast. A TV cannot reach localhost.";
+  }
+  const parts = /^\/play\/([^/]+)\/(.*)$/.exec(request.videoUrl || "");
+  if (!parts) return "This video cannot be cast.";
+  let prefix: string;
+  try {
+    // The TV cannot send the password, so it gets a signed link for this torrent.
+    prefix = window.location.origin + (await get<{ prefix: string }>("/api/cast_link/" + parts[1])).prefix;
+  } catch {
+    return "Could not prepare a cast link.";
+  }
+  const castUrl = (path: string): string | null => {
+    const inner = /^\/play\/[^/]+\/(.*)$/.exec(path || "");
+    return inner ? prefix + inner[1] : null;
+  };
+  const subtitles: CastSubtitle[] = [];
+  for (let i = 0; i < video.textTracks.length; i++) {
+    const track = video.textTracks[i];
+    const src = castUrl(track.id);
+    if (src) subtitles.push({ active: track.mode === "showing", src, label: track.label, srclang: track.language });
+  }
+  return new Promise((resolve) => {
+    cc.cast(
+      {
+        content: castUrl(request.videoUrl) as string,
+        title: request.title || "RapidBay",
+        subtitles,
+        time: video.currentTime || 0,
+        paused: false,
+        poster: null,
+        description: null,
+      },
+      (problem) => {
+        if (problem) return resolve(String(problem));
+        // The TV plays from here, so stop the local copy.
+        if (!video.paused) video.pause();
+        resolve(null);
+      },
+    );
+  });
+}
