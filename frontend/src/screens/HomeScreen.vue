@@ -152,7 +152,8 @@ onBeforeUnmount(() => {
         />
       </form>
     </header>
-    <div class="home-stage">
+    <main class="home-stage">
+      <h1 class="sr-only">RapidBay</h1>
       <div class="home-rows">
         <p v-if="isEmpty" class="empty-state home-empty">Search for a movie or show to get started.</p>
         <LoadingSpinner v-else-if="!homeLoaded" inline />
@@ -215,7 +216,7 @@ onBeforeUnmount(() => {
           </button>
         </nav>
       </div>
-    </div>
+    </main>
   </div>
 </template>
 
@@ -229,7 +230,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-align: left;
 }
-.home-stage { display: contents; }
+.home-stage { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .home-rows {
   position: relative;
   flex: 1;

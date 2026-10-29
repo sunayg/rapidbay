@@ -33,6 +33,10 @@
   :root { --gutter: 16px; --billboard-w: 220px; --billboard-h: 124px; --poster-w: 112px; --poster-h: 160px; }
 }
 html, body { height: 100%; max-width: 100%; }
+/* Motion: transitions are cut and smooth scrolling is off; the loading ring keeps turning, slowly (LoadingSpinner). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; transition-delay: 0s !important; scroll-behavior: auto !important; }
+}
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }

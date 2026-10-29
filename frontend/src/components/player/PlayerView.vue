@@ -443,6 +443,7 @@ onBeforeUnmount(() => {
       autoplay
       playsinline
       tabindex="0"
+      :aria-label="displayTitle || 'Video'"
       @click="togglePlay"
       @play="onPlay"
       @pause="onPause"
@@ -517,7 +518,7 @@ onBeforeUnmount(() => {
           </button>
           <input class="player-volume-slider" type="range" min="0" max="1" step="0.05" :value="muted ? 0 : volume" aria-label="Volume" @input="setVolume" />
         </div>
-        <div class="player-title" :title="displayTitle">{{ displayTitle }}</div>
+        <h1 class="player-title" :title="displayTitle">{{ displayTitle }}</h1>
         <button v-if="nextFilename" type="button" class="player-btn" aria-label="Next episode" @click="playNext">
           <svg class="solid" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14l9-7zM17 5h2v14h-2z" /></svg>
         </button>
@@ -672,7 +673,7 @@ onBeforeUnmount(() => {
 .player-volume-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4px; border-radius: 50%; background: #fff; }
 .player-volume-slider::-moz-range-track { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.35); }
 .player-volume-slider::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: #fff; }
-.player-title { flex: 1 1 0; min-width: 0; padding: 0 var(--space-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; text-align: center; }
+.player-title { margin: 0; font-size: inherit; line-height: inherit; flex: 1 1 0; min-width: 0; padding: 0 var(--space-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; text-align: center; }
 
 .player-pop { position: relative; flex: 0 0 auto; }
 .player-menu {

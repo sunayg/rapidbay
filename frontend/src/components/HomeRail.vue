@@ -19,7 +19,7 @@ function nudge(direction: -1 | 1): void {
   const el = scroller.value;
   if (!el) return;
   const amount = Math.max(220, Math.round(el.clientWidth * 0.8));
-  el.scrollBy({ left: direction * amount, behavior: "smooth" });
+  el.scrollBy({ left: direction * amount, behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 }
 
 onMounted(() => {

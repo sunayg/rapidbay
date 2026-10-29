@@ -70,7 +70,8 @@ export function mediaKeyAction(e: Pick<KeyboardEvent, "key" | "keyCode" | "which
   if (key === "mediafastforward" || code === 417) return "fastforward";
   if (key === "mediarewind") return "rewind";
   if (key === "mediatracknext" || code === 176) return "next";
-  if (key === "escape" || key === "goback" || key === "browserback" || code === 4) return "back";
+  // 4: Android KEYCODE_BACK, 461: webOS Back, 10009: Tizen Back.
+  if (key === "escape" || key === "goback" || key === "browserback" || code === 4 || code === 461 || code === 10009) return "back";
   return null;
 }
 
@@ -270,6 +271,18 @@ export function handleKeydown(e: KeyboardEvent): void {
         e.stopPropagation();
         return;
       }
+    }
+  }
+
+  // A Back key nobody consumed (no menu to close) leaves the screen like Backspace does. Escape only
+  // does so on a TV, where it is the remote's Back; on a desktop it would be a surprise.
+  if (media === "back") {
+    const isEscape = lower === "escape";
+    if (!isEscape || (!typing && document.documentElement.classList.contains("tv-ui"))) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.history.back();
+      return;
     }
   }
 

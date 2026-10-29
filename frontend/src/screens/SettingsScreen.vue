@@ -12,5 +12,7 @@ const home = (router.options.history.base || "") + "/";
     <a :href="home" class="back">&larr; RapidBay</a>
     <h1>Settings</h1>
   </header>
-  <SettingsPage />
+  <main>
+    <SettingsPage />
+  </main>
 </template>

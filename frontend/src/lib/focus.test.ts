@@ -142,6 +142,24 @@ describe("focus handling in the DOM", () => {
     expect(back).toHaveBeenCalled();
   });
 
+  it("an unconsumed Back key goes back; Escape only on a TV", () => {
+    installFocus();
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    for (const code of [4, 461, 10009]) document.dispatchEvent(key({ key: "Unidentified", keyCode: code }));
+    document.dispatchEvent(key({ key: "GoBack" }));
+    expect(back).toHaveBeenCalledTimes(4);
+    document.dispatchEvent(key({ key: "Escape" }));
+    expect(back).toHaveBeenCalledTimes(4);
+    document.documentElement.classList.add("tv-ui");
+    document.dispatchEvent(key({ key: "Escape" }));
+    expect(back).toHaveBeenCalledTimes(5);
+    // A text field keeps Escape for itself.
+    (document.getElementById("i") as HTMLInputElement).focus();
+    document.getElementById("i")!.dispatchEvent(key({ key: "Escape" }));
+    expect(back).toHaveBeenCalledTimes(5);
+    document.documentElement.classList.remove("tv-ui");
+  });
+
   it("leaves text fields alone for Backspace and sideways arrows but not up/down", () => {
     installFocus();
     const input = document.getElementById("i") as HTMLInputElement;
