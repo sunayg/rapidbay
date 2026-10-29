@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouterHistory, type RouteLocationNormalized } from "vue-router";
 import { clearPending } from "./lib/api";
 import { decodeMagnetParam } from "./lib/magnet";
+import HomeScreen from "./screens/HomeScreen.vue";
 import PlaceholderScreen from "./screens/PlaceholderScreen.vue";
 import SettingsScreen from "./screens/SettingsScreen.vue";
 
@@ -25,14 +26,14 @@ export function createAppRouter(history: RouterHistory = createWebHistory(runtim
   const router = createRouter({
     history,
     routes: [
-      { path: "/", name: "home", component: PlaceholderScreen, props: placeholder("search-screen") },
+      { path: "/", name: "home", component: HomeScreen },
       { path: "/search/:searchterm?", name: "search", component: PlaceholderScreen, props: placeholder("search-results-screen") },
       { path: "/torrent/:torrent_link/", name: "torrent", component: PlaceholderScreen, props: placeholder("torrent-link-screen") },
       { path: "/magnet/:magnet_link/", name: "filelist", component: PlaceholderScreen, props: placeholder("filelist-screen") },
       { path: "/magnet/:magnet_link/:filename", name: "download", component: PlaceholderScreen, props: placeholder("download-screen") },
       { path: "/settings", name: "settings", component: SettingsScreen },
       // Legacy: anything unknown shows the home screen.
-      { path: "/:pathMatch(.*)*", name: "fallback", component: PlaceholderScreen, props: placeholder("search-screen") },
+      { path: "/:pathMatch(.*)*", name: "fallback", component: HomeScreen },
     ],
   });
   // Stale requests and timers from the screen we are leaving are dropped.
