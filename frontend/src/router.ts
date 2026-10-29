@@ -3,6 +3,7 @@ import { clearPending } from "./lib/api";
 import { decodeMagnetParam } from "./lib/magnet";
 import HomeScreen from "./screens/HomeScreen.vue";
 import PlaceholderScreen from "./screens/PlaceholderScreen.vue";
+import SearchResultsScreen from "./screens/SearchResultsScreen.vue";
 import SettingsScreen from "./screens/SettingsScreen.vue";
 
 // While both apps coexist the new one is served under /next/ (and /settings).
@@ -27,7 +28,7 @@ export function createAppRouter(history: RouterHistory = createWebHistory(runtim
     history,
     routes: [
       { path: "/", name: "home", component: HomeScreen },
-      { path: "/search/:searchterm?", name: "search", component: PlaceholderScreen, props: placeholder("search-results-screen") },
+      { path: "/search/:searchterm?", name: "search", component: SearchResultsScreen },
       { path: "/torrent/:torrent_link/", name: "torrent", component: PlaceholderScreen, props: placeholder("torrent-link-screen") },
       { path: "/magnet/:magnet_link/", name: "filelist", component: PlaceholderScreen, props: placeholder("filelist-screen") },
       { path: "/magnet/:magnet_link/:filename", name: "download", component: PlaceholderScreen, props: placeholder("download-screen") },

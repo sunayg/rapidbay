@@ -54,7 +54,7 @@ export async function clearField(key: string): Promise<SettingsPayload> {
 const pendingControllers = new Set<AbortController>();
 const pendingTimeouts = new Set<ReturnType<typeof setTimeout>>();
 
-function restoreCookie(): void {
+export function restoreCookie(): void {
   // Legacy: the password cookie is mirrored in localStorage and restored if lost.
   if (!document.cookie) {
     const saved = storageGet("cookie");
