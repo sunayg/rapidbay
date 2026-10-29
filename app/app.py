@@ -1514,6 +1514,17 @@ def frontend_v2(path: str, password: str | None = Cookie(default=None)) -> Respo
     raise HTTPException(status_code=404, detail="File not found")
 
 
+@app.get("/next/{path:path}", include_in_schema=False)
+def frontend_next(path: str, password: str | None = Cookie(default=None)) -> Response:
+    """Vue app under development: real files are served as-is, every other path
+    gets the app entry page (client-side routes) behind the password gate."""
+    if path not in ("", "index.html"):
+        filepath = _resolve_within(settings.FRONTEND_V2_DIR, path)
+        if filepath and os.path.isfile(filepath):
+            return FileResponse(filepath)
+    return _v2_entry(password)
+
+
 app.include_router(settings_api.build_router(authorize))
 
 

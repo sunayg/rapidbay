@@ -46,3 +46,24 @@ def test_missing_directory(client, monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "FRONTEND_V2_DIR", str(tmp_path / "nope"))
     assert client.get("/settings").status_code == 404
     assert client.get("/").text == "OLD-INDEX"
+
+
+def test_next_routes_serve_the_app_entry_behind_the_gate(client, monkeypatch):
+    assert client.get("/next/").text == "V2-INDEX"
+    assert client.get("/next/search/dune").text == "V2-INDEX"
+    assert client.get("/next/magnet/abc%253A/file.mkv").text == "V2-INDEX"
+    monkeypatch.setattr(settings, "PASSWORD", "pw")
+    assert client.get("/next/").text == "LOGIN"
+    assert client.get("/next/search/dune").text == "LOGIN"
+    client.cookies.set("password", "pw")
+    assert client.get("/next/search/dune").text == "V2-INDEX"
+
+
+def test_next_serves_real_files(client):
+    assert client.get("/next/assets/a.js").text == "console.log(1)"
+
+
+def test_next_traversal_is_blocked(client):
+    # Never leaks files outside the Vue build; the entry page is all that comes back.
+    for path in ("/next/%2e%2e/old/index.html", "/next/%2Fetc%2Fpasswd", "/next//etc/passwd", "/next/..%2f..%2fetc/passwd"):
+        assert client.get(path).text == "V2-INDEX"

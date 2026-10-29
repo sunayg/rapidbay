@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { clearField, getSettings, resetField, saveCategory } from "../api";
+import { clearField, getSettings, resetField, saveCategory } from "../lib/api";
 import type { FieldInfo, SettingsPayload } from "../types";
 import CategoryNav from "./CategoryNav.vue";
 import SettingField from "./SettingField.vue";

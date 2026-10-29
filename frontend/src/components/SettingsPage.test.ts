@@ -1,11 +1,11 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import * as api from "../api";
+import * as api from "../lib/api";
 import type { SettingsPayload } from "../types";
 import { field } from "./fixtures";
 import SettingsPage from "./SettingsPage.vue";
 
-vi.mock("../api");
+vi.mock("../lib/api");
 
 const payload: SettingsPayload = {
   categories: [

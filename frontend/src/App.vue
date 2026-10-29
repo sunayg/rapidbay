@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import SettingsPage from "./components/SettingsPage.vue";
+import { onBeforeUnmount, onMounted } from "vue";
+import { RouterView } from "vue-router";
+import { installFocus, uninstallFocus } from "./lib/focus";
+
+onMounted(installFocus);
+onBeforeUnmount(uninstallFocus);
 </script>
 
 <template>
-  <header class="top">
-    <a href="/" class="back">&larr; RapidBay</a>
-    <h1>Settings</h1>
-  </header>
-  <SettingsPage />
+  <RouterView />
 </template>

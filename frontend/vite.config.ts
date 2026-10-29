@@ -7,5 +7,5 @@ export default defineConfig({
   base: "/v2/",
   plugins: [vue()],
   server: { proxy: { "/api": "http://localhost:5000" } },
-  test: { environment: "jsdom" },
+  test: { environment: "jsdom", setupFiles: ["./src/test-setup.ts"], exclude: ["e2e/**", "node_modules/**"] },
 });
