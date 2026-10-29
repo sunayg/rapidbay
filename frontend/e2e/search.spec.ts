@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// Runs against the Docker stack: http://localhost:5050/next/
+// Runs against the Docker stack: http://localhost:5050/
 // Streams are mocked with page.route (deterministic); the last test searches for real.
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -83,7 +83,7 @@ test("streamed results render, a movie opens and focus walks with the arrow keys
     { groups: [dune, { ...dune, tmdb_id: 2, title: "Dune: Part Two", year: 2024, results: [item("Dune.Part.Two.2024.1080p", 90)] }], other: [], done: false },
     { groups: [dune, { ...dune, tmdb_id: 2, title: "Dune: Part Two", year: 2024, results: [item("Dune.Part.Two.2024.1080p", 90)] }], other: [item("Dune documentary", 3)], done: true },
   ]);
-  await page.goto("/next/search/dune");
+  await page.goto("/search/dune");
   await expect(page.locator('[data-screen="search-results-screen"]')).toBeVisible();
   await expect(page.locator(".group-card")).toHaveCount(2);
   await expect(page.locator(".rich-search-pending")).toHaveCount(0);
@@ -104,17 +104,17 @@ test("streamed results render, a movie opens and focus walks with the arrow keys
   // Selecting a release opens its file list.
   await page.keyboard.press("ArrowUp");
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/next\/magnet\/.+/);
+  await expect(page).toHaveURL(/\/magnet\/.+/);
   expect(errors).toEqual([]);
   // Backspace returns to the results.
   await page.keyboard.press("Backspace");
-  await expect(page).toHaveURL(/\/next\/search\/dune$/);
+  await expect(page).toHaveURL(/\/search\/dune$/);
 });
 
 test("a TV show: pick a season, an episode and a release, and the choice reaches the file list", async ({ page }) => {
   await mockRich(page, [{ groups: [severance], other: [], done: true }]);
   await mockSeason(page);
-  await page.goto("/next/search/severance");
+  await page.goto("/search/severance");
   // A lone group opens by itself.
   await expect(page.locator(".season-toggle")).toHaveCount(2);
   await page.getByRole("button", { name: /Season 1/ }).click();
@@ -123,16 +123,16 @@ test("a TV show: pick a season, an episode and a release, and the choice reaches
   const releases = page.locator(".season-block").first().locator(".result-row");
   await expect(releases).toHaveText([/1080p WEB/, /720p WEB/]);
   await releases.first().click();
-  await expect(page).toHaveURL(/\/next\/magnet\//);
+  await expect(page).toHaveURL(/\/magnet\//);
   expect(await page.evaluate(() => sessionStorage.getItem("rapidbayEpisodeTarget"))).toBe(JSON.stringify({ season: 1, episode: 1 }));
 });
 
 test("the search box searches and saves the term to the history", async ({ page }) => {
   await mockRich(page, [{ groups: [], other: [item("Something", 5)], done: true }]);
-  await page.goto("/next/search/first");
+  await page.goto("/search/first");
   await page.locator("input.form-control").fill("second term");
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/next\/search\/second%20term$/);
+  await expect(page).toHaveURL(/\/search\/second%20term$/);
   await expect(page.locator(".result-row")).toHaveCount(1);
   expect(await page.evaluate(() => localStorage.getItem("searchHistory"))).toBe(JSON.stringify(["second term"]));
 });
@@ -145,24 +145,24 @@ test("history and favorites views list what was saved", async ({ page }) => {
       localStorage.setItem("favorites", JSON.stringify([{ magnet: "magnet:?xt=urn:btih:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB&dn=Fav", filename: "fav.mkv", title: "fav.mkv", ts: 1 }]));
     }
   });
-  await page.goto("/next/search/%5Bhistory%5D");
+  await page.goto("/search/%5Bhistory%5D");
   await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
   await expect(page.locator(".result-label")).toHaveText(["Old download"]);
-  await page.goto("/next/search/%5Bfavorites%5D");
+  await page.goto("/search/%5Bfavorites%5D");
   await expect(page.getByRole("heading", { name: "Favorites" })).toBeVisible();
   await page.locator(".result-row").click();
-  await expect(page).toHaveURL(/\/next\/magnet\/.+\/fav\.mkv$/);
+  await expect(page).toHaveURL(/\/magnet\/.+\/fav\.mkv$/);
 });
 
 test("an empty result set is explained", async ({ page }) => {
   await mockRich(page, [{ groups: [], other: [], done: true }]);
   await page.route("**/api/search_events/**", (route) => route.fulfill({ status: 200, contentType: "text/event-stream", body: sse([{ results: null, done: true }]) }));
-  await page.goto("/next/search/nothingatall");
+  await page.goto("/search/nothingatall");
   await expect(page.locator(".empty-state")).toHaveText("No results for “nothingatall”.");
 });
 
 test("a real search settles (tolerant: results or an empty message, never a stuck spinner)", async ({ page }) => {
-  await page.goto("/next/search/big%20buck%20bunny");
+  await page.goto("/search/big%20buck%20bunny");
   await expect(page.locator(".results-body .spinner")).toHaveCount(0, { timeout: 25_000 });
   const rows = await page.locator(".result-row, .group-card").count();
   if (!rows) await expect(page.locator(".empty-state, .results-error")).toBeVisible();

@@ -1,8 +1,11 @@
 # RapidBay frontend (Vue 3)
 
-Vue 3 + TypeScript + Vite. The new UI is served by the backend under `/next/` (the settings page at
-`/settings`) while the legacy app still lives at `/`. The Dockerfile builds it in its first stage, so a
-change only shows up in the stack after the image is rebuilt.
+Vue 3 + TypeScript + Vite. The backend serves the build (`frontend/dist`, or `FRONTEND_DIR`) at `/`: real files (`assets/`, `lib/`,
+`manifest.json`, `favicon.png`, `sw.js`, `login.html`) as-is, and every other path (`/search/...`, `/magnet/...`,
+`/settings`) as `index.html`, or `login.html` when a `PASSWORD` is set and the cookie is missing. Unknown
+`/api/`, `/play/` and `/cast/` paths are a JSON 404. The Dockerfile builds it in its first stage, so a
+change only shows up in the stack after the image is rebuilt. Static files (manifest, favicon, service
+worker, login page, vendored scripts and the logo) live in `public/`.
 
 ## Scripts
 
@@ -10,7 +13,7 @@ Run from `frontend/` after `npm ci` (or `npm install`).
 
 | Command | What it does |
 | --- | --- |
-| `npm run dev` | Vite dev server (proxies `/api` to `localhost:5000`). Good for the home screen; client-side routes only resolve under `/next/`, so for anything else use the Docker stack below. |
+| `npm run dev` | Vite dev server (proxies `/api` to `localhost:5000`). Good for the home screen; Vite serves `index.html` for client-side routes, but `/play/`, login and the other backend routes only exist in the Docker stack below. |
 | `npm test` | Unit and component tests (Vitest + jsdom). No stack needed. |
 | `npm run build` | `vue-tsc --noEmit` (type check) and `vite build` into `dist/`. |
 | `npm run e2e` | Playwright end-to-end tests against a running stack (see below). |

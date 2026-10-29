@@ -97,7 +97,7 @@ A saved value beats the environment variable, which beats the built-in default. 
 
 If `PASSWORD` is set, the page uses it. If it is not, anyone who can reach the server can open the page, and can set a password. To recover from a lockout, delete `settings.json`. A numeric `PASSWORD` from the environment (such as `1234`) now works; before it could never match.
 
-The page is a Vue 3 app in `frontend/` (`npm install && npm run dev` for development; the Dockerfile builds it).
+The whole web UI is a Vue 3 + Vite app in `frontend/` (`npm install && npm run dev` for development; the Dockerfile builds it into `/frontend`, which the backend serves at `/`, see `FRONTEND_DIR`). See `frontend/README.md` for tests.
 
 ## Subtitles
 

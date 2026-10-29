@@ -18,7 +18,7 @@ import {
   type SearchResult,
 } from "../lib/results";
 
-// Served by the backend next to the legacy app; kept out of the bundler on purpose.
+// Served by the backend from public/lib; kept out of the bundler on purpose.
 const LOGO = "/lib/rapidbay-logo.png";
 
 const route = useRoute();

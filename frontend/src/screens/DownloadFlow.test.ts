@@ -62,7 +62,7 @@ const body = (call: { init?: RequestInit }) => Object.fromEntries((call.init?.bo
 let mounted: VueWrapper | null = null;
 
 async function visit(path: string, before?: string) {
-  const router = createAppRouter(createMemoryHistory("/next/"));
+  const router = createAppRouter(createMemoryHistory("/"));
   if (before) await router.push(before);
   await router.push(path);
   await router.isReady();

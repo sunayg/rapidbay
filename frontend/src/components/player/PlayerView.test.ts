@@ -38,7 +38,7 @@ function stubFetch(): void {
 const libraryPosts = () => fetched.filter((f) => f.url.startsWith("/api/library/observe/"));
 
 async function mountPlayer(props: Record<string, unknown> = {}) {
-  const router = createAppRouter(createMemoryHistory("/next/"));
+  const router = createAppRouter(createMemoryHistory("/"));
   await router.push("/magnet/x/y");
   await router.isReady();
   wrapper = mount(PlayerView, {
@@ -610,7 +610,7 @@ describe("cleanup", () => {
   });
 
   it("a player torn down before hls.js loaded does not leave an instance running", async () => {
-    const router = createAppRouter(createMemoryHistory("/next/"));
+    const router = createAppRouter(createMemoryHistory("/"));
     wrapper = mount(PlayerView, {
       props: { url: HLS, supported: true, subtitles: [], magnet: MAGNET, filename: FILE, downloadProgress: null, downloadStatus: null },
       global: { plugins: [router] },

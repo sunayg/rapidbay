@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.vue";
 import * as api from "./lib/api";
 import { encodeMagnetParam } from "./lib/magnet";
-import { createAppRouter, runtimeBase } from "./router";
+import { createAppRouter } from "./router";
 
 vi.mock("./components/SettingsPage.vue", () => ({ default: { template: "<div class='settings-stub'>categories</div>" } }));
 
@@ -14,7 +14,7 @@ beforeEach(() => {
 });
 
 async function visit(path: string) {
-  const router = createAppRouter(createMemoryHistory("/next/"));
+  const router = createAppRouter(createMemoryHistory("/"));
   router.push(path);
   await router.isReady();
   const wrapper = mount(App, { global: { plugins: [router] } });
@@ -23,13 +23,6 @@ async function visit(path: string) {
 }
 
 describe("router", () => {
-  it("chooses the base from the path", () => {
-    expect(runtimeBase("/next/search/x")).toBe("/next/");
-    expect(runtimeBase("/next")).toBe("/next/");
-    expect(runtimeBase("/settings")).toBe("/");
-    expect(runtimeBase("/nextgen")).toBe("/");
-  });
-
   it.each([
     ["/", "search-screen"],
     ["/search", "search-results-screen"],

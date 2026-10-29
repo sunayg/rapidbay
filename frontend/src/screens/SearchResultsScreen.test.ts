@@ -88,7 +88,7 @@ const severance = {
 let mounted: VueWrapper | null = null;
 
 async function visit(path: string) {
-  const router = createAppRouter(createMemoryHistory("/next/"));
+  const router = createAppRouter(createMemoryHistory("/"));
   await router.push(path);
   await router.isReady();
   const wrapper = mount(App, { attachTo: document.body, global: { plugins: [router] } });

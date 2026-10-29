@@ -1492,51 +1492,34 @@ def cast_play(token: str, magnet_hash: str, filename: str) -> Response:
     return _serve_output_file(magnet_hash, filename)
 
 
-def _v2_entry(password: str | None) -> Response:
-    """Vue app entry page, behind the same password gate as the old index.html."""
-    if settings.PASSWORD and password != settings.PASSWORD:
-        return _send_from_directory(settings.FRONTEND_DIR, "login.html", last_modified=datetime.datetime.now())
-    return _send_from_directory(settings.FRONTEND_V2_DIR, "index.html", last_modified=datetime.datetime.now())
+def _spa_entry(password: str | None) -> Response:
+    """Vue app entry page, or the login page when a password is set and not given."""
+    page = "index.html" if not settings.PASSWORD or password == settings.PASSWORD else "login.html"
+    return _send_from_directory(settings.FRONTEND_DIR, page, last_modified=datetime.datetime.now())
 
 
-@app.get("/settings", include_in_schema=False)
-def settings_page(password: str | None = Cookie(default=None)) -> Response:
-    return _v2_entry(password)
-
-
-@app.get("/v2/{path:path}", include_in_schema=False)
-def frontend_v2(path: str, password: str | None = Cookie(default=None)) -> Response:
-    if path in ("", "index.html"):
-        return _v2_entry(password)
-    filepath = _resolve_within(settings.FRONTEND_V2_DIR, path)
-    if filepath and os.path.isfile(filepath):
-        return FileResponse(filepath)
-    raise HTTPException(status_code=404, detail="File not found")
-
-
-@app.get("/next/{path:path}", include_in_schema=False)
-def frontend_next(path: str, password: str | None = Cookie(default=None)) -> Response:
-    """Vue app under development: real files are served as-is, every other path
-    gets the app entry page (client-side routes) behind the password gate."""
-    if path not in ("", "index.html"):
-        filepath = _resolve_within(settings.FRONTEND_V2_DIR, path)
-        if filepath and os.path.isfile(filepath):
-            return FileResponse(filepath)
-    return _v2_entry(password)
+@app.get("/app.kodi.py", include_in_schema=False)
+def kodi_plugin_code() -> Response:
+    """Code the Kodi addon downloads and runs (it cannot log in, so no password gate)."""
+    return _send_from_directory(settings.KODI_ADDON_DIR, "app.kodi.py")
 
 
 app.include_router(settings_api.build_router(authorize))
 
 
+# Paths that belong to the backend: an unknown one is a 404, never the SPA page.
+_BACKEND_PREFIXES = ("api/", "play/", "cast/", "kodi.repo/")
+
+
 # Catch-all route for frontend - MUST be defined last
 @app.get("/{path:path}", include_in_schema=False)
 def frontend(path: str, password: str | None = Cookie(default=None)) -> Response:
-    if path == "":
-        path = "index.html"
-    if not path.startswith("index.html"):
+    """Real files from the Vue build are served as-is (assets, manifest, favicon, sw.js, lib/).
+    Every other path is a client-side route and gets the entry page behind the password gate."""
+    if path == "api" or path.startswith(_BACKEND_PREFIXES):
+        raise HTTPException(status_code=404, detail="Not Found")
+    if path not in ("", "index.html", "login.html"):
         filepath = _resolve_within(settings.FRONTEND_DIR, path)
         if filepath and os.path.isfile(filepath):
             return FileResponse(filepath)
-    if not settings.PASSWORD or password == settings.PASSWORD:
-        return _send_from_directory(settings.FRONTEND_DIR, "index.html", last_modified=datetime.datetime.now())
-    return _send_from_directory(settings.FRONTEND_DIR, "login.html", last_modified=datetime.datetime.now())
+    return _spa_entry(password)

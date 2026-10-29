@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-// Runs against the Docker stack: http://localhost:5050/next/
+// Runs against the Docker stack: http://localhost:5050/
 // The API and the media are mocked with page.route; the media are small real
 // VP9/Opus files (e2e/fixtures: a 10 s MP4 and the same clip as fMP4 HLS), so
 // the <video> element really decodes, plays, seeks and shows captions. VP9 is
@@ -12,7 +12,7 @@ const MAGNET = "magnet:?xt=urn:btih:ABCDEF0123456789ABCDEF0123456789ABCDEF01&dn=
 const HASH = "abcdef0123456789abcdef0123456789abcdef01";
 const FILE = "Some.Show.S01E01.1080p.mkv";
 const NEXT_FILE = "Some.Show.S01E02.1080p.mkv";
-const magnetUrl = (file: string) => `/next/magnet/${encodeURIComponent(encodeURIComponent(MAGNET))}/${encodeURIComponent(file)}`;
+const magnetUrl = (file: string) => `/magnet/${encodeURIComponent(encodeURIComponent(MAGNET))}/${encodeURIComponent(file)}`;
 const FIXTURES = fileURLToPath(new URL("./fixtures", import.meta.url));
 const VTT = (text: string) => `WEBVTT\n\n00:00:00.000 --> 00:00:09.000\n${text}\n`;
 

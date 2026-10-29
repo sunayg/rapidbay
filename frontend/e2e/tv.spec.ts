@@ -98,7 +98,7 @@ async function expectFocusVisibleOnScreen(page: Page): Promise<void> {
 
 test("the TV user agent switches the app to tv-ui", async ({ page }) => {
   await mockStack(page);
-  await page.goto("/next/");
+  await page.goto("/");
   await expect(page.locator("html")).toHaveClass(/tv-ui/);
   // A TV remote has no pointer: the search box is not auto-focused (it would open the on-screen keyboard).
   await expect(page.locator("input.form-control")).not.toBeFocused();
@@ -108,7 +108,7 @@ test("home -> search -> file list -> player with only remote keys", async ({ pag
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await mockStack(page);
-  await page.goto("/next/");
+  await page.goto("/");
   await expect(page.locator('[data-screen="search-screen"]')).toBeVisible();
 
   // Home: the first D-pad press lands on the search box; Enter on it and typing reaches the field.
@@ -116,7 +116,7 @@ test("home -> search -> file list -> player with only remote keys", async ({ pag
   await expect(page.locator("input.form-control")).toBeFocused();
   await page.keyboard.type("dune");
   await press(page, "Enter");
-  await expect(page).toHaveURL(/\/next\/search\/dune$/);
+  await expect(page).toHaveURL(/\/search\/dune$/);
 
   // Results: a lone title opens by itself and the focus is on its first release.
   const rows = page.locator(".group-card").first().locator(".result-row");
@@ -126,7 +126,7 @@ test("home -> search -> file list -> player with only remote keys", async ({ pag
   await press(page, "ArrowDown");
   await expect(rows.nth(1)).toBeFocused();
   await press(page, "ArrowUp", "Enter");
-  await expect(page).toHaveURL(/\/next\/magnet\//);
+  await expect(page).toHaveURL(/\/magnet\//);
 
   // File list: Down/Up move between files, Back returns to the results with the card still there.
   const fileRows = page.locator(".file-row");
@@ -138,7 +138,7 @@ test("home -> search -> file list -> player with only remote keys", async ({ pag
   await press(page, "ArrowDown"); // the end of the list: the focus must stay on a file
   await expect(fileRows.nth(1)).toBeFocused();
   await press(page, "Backspace");
-  await expect(page).toHaveURL(/\/next\/search\/dune$/);
+  await expect(page).toHaveURL(/\/search\/dune$/);
   await expect(page.locator(".group-card").first()).toBeVisible();
   await expect(rows.first()).toBeFocused();
   await press(page, "Enter");
@@ -173,17 +173,17 @@ test("home -> search -> file list -> player with only remote keys", async ({ pag
   await expect(page.locator('[data-screen="player-screen"]')).toBeVisible();
   // Back leaves the player for the file list, and Back again for the results.
   await press(page, "Escape");
-  await expect(page).toHaveURL(/\/next\/magnet\/[^/]+\/?$/);
+  await expect(page).toHaveURL(/\/magnet\/[^/]+\/?$/);
   await press(page, "Backspace");
-  await expect(page).toHaveURL(/\/next\/search\/dune$/);
+  await expect(page).toHaveURL(/\/search\/dune$/);
   await press(page, "Backspace");
-  await expect(page).toHaveURL(/\/next\/$/);
+  await expect(page).toHaveURL(/\/$/);
   expect(errors).toEqual([]);
 });
 
 test("the settings screen can be reached and left with the remote", async ({ page }) => {
   await mockStack(page);
-  await page.goto("/next/");
+  await page.goto("/");
   await page.locator(".home-shortcut", { hasText: "Settings" }).waitFor();
   for (let i = 0; i < 10 && !(await focused(page)).includes("home-shortcut"); i++) await press(page, "ArrowDown");
   for (let i = 0; i < 5; i++) {
@@ -203,7 +203,7 @@ test("the home rows are walked with the D-pad: nothing loses the focus or leaves
     Array.from({ length: 10 }, (_, i) => ({ tmdb_id: i + 1, media_type: kind, title: `${kind} ${i + 1}`, year: 2020, poster_url: POSTER, backdrop_url: POSTER, rank: i + 1 }));
   await page.route("**/api/home/**", (route) => route.fulfill({ json: { series: titles("tv"), movies: titles("movie") } }));
   await page.addInitScript(() => localStorage.setItem("searchHistory", JSON.stringify(["dune", "severance"])));
-  await page.goto("/next/");
+  await page.goto("/");
   await expect(page.locator(".billboard-card, .poster-card").first()).toBeVisible();
 
   const visited: string[] = [];
@@ -244,7 +244,7 @@ test("a download in progress can be streamed, left and cancelled with the remote
     cancelled = true;
     return route.fulfill({ json: { magnet_hash: HASH } });
   });
-  await page.goto(`/next/magnet/${encodeURIComponent(encodeURIComponent(MAGNET))}/${encodeURIComponent(FILES[0])}`);
+  await page.goto(`/magnet/${encodeURIComponent(encodeURIComponent(MAGNET))}/${encodeURIComponent(FILES[0])}`);
   await expect(page.locator('[data-screen="download-screen"]')).toBeVisible();
   await expect(page.locator(".cancel-download")).toBeVisible();
   const seen = new Set<string>();

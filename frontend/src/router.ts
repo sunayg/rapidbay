@@ -7,13 +7,7 @@ import SearchResultsScreen from "./screens/SearchResultsScreen.vue";
 import SettingsScreen from "./screens/SettingsScreen.vue";
 import TorrentLinkScreen from "./screens/TorrentLinkScreen.vue";
 
-// While both apps coexist the new one is served under /next/ (and /settings).
-// One build serves both; this is removed at cutover.
-export function runtimeBase(pathname: string = window.location.pathname): string {
-  return pathname.startsWith("/next/") || pathname === "/next" ? "/next/" : "/";
-}
-
-export function createAppRouter(history: RouterHistory = createWebHistory(runtimeBase())) {
+export function createAppRouter(history: RouterHistory = createWebHistory()) {
   const router = createRouter({
     history,
     routes: [

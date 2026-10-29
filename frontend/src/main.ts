@@ -4,3 +4,8 @@ import { createAppRouter } from "./router";
 import "./style.css";
 
 createApp(App).use(createAppRouter()).mount("#app");
+
+
+if (navigator.serviceWorker) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}

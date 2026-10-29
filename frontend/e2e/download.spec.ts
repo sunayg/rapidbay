@@ -1,10 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// Runs against the Docker stack: http://localhost:5050/next/
+// Runs against the Docker stack: http://localhost:5050/
 // Every API call is mocked with page.route; no real torrent is ever started.
 const MAGNET = "magnet:?xt=urn:btih:ABCDEF0123456789ABCDEF0123456789ABCDEF01&dn=Some.Show";
 const HASH = "abcdef0123456789abcdef0123456789abcdef01";
-const magnetUrl = (file?: string) => `/next/magnet/${encodeURIComponent(encodeURIComponent(MAGNET))}/${file ? encodeURIComponent(file) : ""}`;
+const magnetUrl = (file?: string) => `/magnet/${encodeURIComponent(encodeURIComponent(MAGNET))}/${file ? encodeURIComponent(file) : ""}`;
 const FILES = ["Some.Show.S01E01.1080p.mkv", "Some.Show.S01E02.1080p.mkv", "Some.Show.S01E03.1080p.mkv"];
 
 const sse = (events: unknown[]) => events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
@@ -57,7 +57,7 @@ test("a remembered episode opens its file directly, and Back skips the list", as
   await mockFiles(page, FILES);
   await page.route(`**/api/magnet/${HASH}/${encodeURIComponent(FILES[2])}`, (route) => route.fulfill({ json: { status: "queued" } }));
   await page.route(`**/api/magnet_events/${HASH}/${encodeURIComponent(FILES[2])}`, (route) => route.abort());
-  await page.goto("/next/search/nothing");
+  await page.goto("/search/nothing");
   await page.evaluate(() => sessionStorage.setItem("rapidbayEpisodeTarget", JSON.stringify({ season: 1, episode: 3 })));
   await page.goto(magnetUrl());
   await expect(page.locator('[data-screen="download-screen"]')).toBeVisible();
@@ -65,7 +65,7 @@ test("a remembered episode opens its file directly, and Back skips the list", as
   expect(await page.evaluate(() => sessionStorage.getItem("rapidbayEpisodeTarget"))).toBeNull();
   // The list replaced itself, so one Back returns to where the search was.
   await page.goBack();
-  await expect(page).toHaveURL(/\/next\/search\/nothing$/);
+  await expect(page).toHaveURL(/\/search\/nothing$/);
 });
 
 test("a single file opens without showing the list", async ({ page }) => {
@@ -79,7 +79,7 @@ test("a single file opens without showing the list", async ({ page }) => {
 test("torrent link converts to a magnet and lands on the file list", async ({ page }) => {
   await page.route("**/api/torrent_url_to_magnet/", (route) => route.fulfill({ json: { magnet_link: MAGNET } }));
   await mockFiles(page, FILES);
-  await page.goto("/next/torrent/" + encodeURIComponent("http://example.test/a.torrent") + "/");
+  await page.goto("/torrent/" + encodeURIComponent("http://example.test/a.torrent") + "/");
   await expect(page.locator('[data-screen="filelist-screen"]')).toBeVisible();
   await expect(page.locator(".file-row")).toHaveCount(3);
   expect(new URL(page.url()).pathname).toBe(magnetUrl().replace(/\/$/, ""));

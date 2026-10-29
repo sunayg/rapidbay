@@ -50,7 +50,7 @@ pythonVersion = "3.12"
 pythonPlatform = "All"
 
 # Import discovery
-exclude = ["**/frontend/**"]
+exclude = ["**/frontend/**", "app/kodi.addon"]
 
 # Type checking mode
 typeCheckingMode = "standard"
@@ -159,13 +159,12 @@ exclude = [
     "dist",
     "build",
     "*.egg",
-    "app/frontend",
 ]
 
 # Per-file ignores
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Allow unused imports in __init__.py files
-"app/frontend/**" = ["F821"]  # Ignore undefined names in Kodi frontend
+"app/kodi.addon/**" = ["F821"]  # Ignore undefined names in the Kodi plugin code (run inside Kodi)
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

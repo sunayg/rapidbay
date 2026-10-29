@@ -24,7 +24,7 @@ const recent = [{ tmdb_id: 41, media_type: "tv", title: "Fargo", backdrop_url: "
 let mounted: VueWrapper | null = null;
 
 async function visit(path = "/") {
-  const router = createAppRouter(createMemoryHistory("/next/"));
+  const router = createAppRouter(createMemoryHistory("/"));
   await router.push(path);
   await router.isReady();
   const wrapper = mount(App, { attachTo: document.body, global: { plugins: [router] } });
@@ -207,7 +207,7 @@ describe("HomeScreen navigation", () => {
     const register = vi.fn();
     Object.defineProperty(navigator, "registerProtocolHandler", { value: register, configurable: true });
     await visit("/registerhandler");
-    expect(register).toHaveBeenCalledWith("magnet", expect.stringMatching(/\/next\/magnet\/%s$/));
+    expect(register).toHaveBeenCalledWith("magnet", expect.stringMatching(/\/magnet\/%s$/));
   });
 });
 

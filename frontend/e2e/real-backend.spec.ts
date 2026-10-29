@@ -33,7 +33,7 @@ const TWO = "RapidBay.E2E.Part.Two.mkv";
 const stem = (file: string) => file.replace(/\.mkv$/, "");
 const READY_MAGNET = magnetFor(READY_HASH, "RapidBay.E2E");
 const HLS_MAGNET = magnetFor(HLS_HASH, "RapidBay.E2E.Hls");
-const url = (magnet: string, file?: string) => `/next/magnet/${encodeURIComponent(encodeURIComponent(magnet))}/${file ? encodeURIComponent(file) : ""}`;
+const url = (magnet: string, file?: string) => `/magnet/${encodeURIComponent(encodeURIComponent(magnet))}/${file ? encodeURIComponent(file) : ""}`;
 
 let reachable = false;
 let outputDir = "";

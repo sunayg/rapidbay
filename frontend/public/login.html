@@ -3,7 +3,6 @@
     <head>
         <meta charset="utf-8" />
         <title>RapidBay</title>
-        <script src="/lib/jquery-3.3.1.min.js"></script>
         <link rel="manifest" href="/manifest.json" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <style>
@@ -105,12 +104,14 @@
                 if (!password) return;
                 var error = document.getElementById("error");
                 error.textContent = "";
-                $.post(
-                    "/api",
-                    { password: password },
-                    function (data, status, response) {
-                        var cookieHeader =
-                            response.getResponseHeader("x-set-cookie");
+                fetch("/api", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                    body: new URLSearchParams({ password: password }).toString(),
+                })
+                    .then(function (response) {
+                        if (!response.ok) throw new Error("status " + response.status);
+                        var cookieHeader = response.headers.get("x-set-cookie");
                         if (!cookieHeader) {
                             error.textContent = "That password didn't work. Try again.";
                             return;
@@ -121,10 +122,10 @@
                             localStorage.setItem("cookie", cookieHeader);
                         }
                         location.reload();
-                    }
-                ).fail(function () {
-                    error.textContent = "Couldn't reach the server. Try again.";
-                });
+                    })
+                    .catch(function () {
+                        error.textContent = "Couldn't reach the server. Try again.";
+                    });
             };
             if (navigator.serviceWorker) {
                 navigator.serviceWorker.register("/sw.js");

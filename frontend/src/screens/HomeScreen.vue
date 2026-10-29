@@ -18,7 +18,7 @@ import {
 import { magnetPath, searchPath } from "../lib/magnet";
 import { titleSearchQuery, type HomeTitle } from "../lib/titles";
 
-// Served by the backend next to the legacy app; kept out of the bundler on purpose.
+// Served by the backend from public/lib; kept out of the bundler on purpose.
 const LOGO = "/lib/rapidbay-logo.png";
 
 const router = useRouter();

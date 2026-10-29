@@ -32,7 +32,7 @@ const dune = {
 const titles = (kind: string) =>
   Array.from({ length: 6 }, (_, i) => ({ tmdb_id: i + 1, media_type: kind, title: `A fairly long ${kind} title number ${i + 1}`, year: 2020, poster_url: POSTER, backdrop_url: POSTER, rank: i + 1 }));
 const sse = (events: unknown[]) => events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
-const magnetUrl = (file?: string) => `/next/magnet/${encodeURIComponent(encodeURIComponent(MAGNET))}/${file ? encodeURIComponent(file) : ""}`;
+const magnetUrl = (file?: string) => `/magnet/${encodeURIComponent(encodeURIComponent(MAGNET))}/${file ? encodeURIComponent(file) : ""}`;
 
 type Info = Record<string, unknown>;
 async function mock(page: Page, info: Info): Promise<{ current: Info }> {
@@ -79,8 +79,8 @@ interface Screen {
   ready: string;
 }
 const SCREENS: Screen[] = [
-  { name: "home", path: "/next/", info: READY, ready: ".poster-card" },
-  { name: "search results", path: "/next/search/dune", info: READY, ready: ".result-row" },
+  { name: "home", path: "/", info: READY, ready: ".poster-card" },
+  { name: "search results", path: "/search/dune", info: READY, ready: ".result-row" },
   { name: "file list", path: magnetUrl(), info: READY, ready: ".file-row" },
   { name: "download", path: magnetUrl(FILES[0]), info: DOWNLOADING, ready: ".cancel-download" },
   { name: "player", path: magnetUrl(FILES[0]), info: READY, ready: ".player-controls" },
@@ -281,6 +281,6 @@ test("the page declares its language and a viewport, and each screen has one mai
     expect(await page.locator("main").count(), `${screen.name}: <main> landmarks`).toBe(1);
     expect(await page.locator("h1, h2").count(), `${screen.name}: headings`).toBeGreaterThan(0);
   }
-  await page.goto("/next/");
+  await page.goto("/");
   expect(await page.locator('meta[name="viewport"]').getAttribute("content")).toContain("width=device-width");
 });

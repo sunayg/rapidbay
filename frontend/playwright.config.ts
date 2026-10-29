@@ -9,6 +9,8 @@ export default defineConfig({
   use: {
     baseURL: process.env.BASE_URL || "http://localhost:5050",
     trace: "retain-on-failure",
+    // The app registers a pass-through service worker (PWA); requests it handles bypass page.route mocks.
+    serviceWorkers: "block",
   },
   projects: [
     {
