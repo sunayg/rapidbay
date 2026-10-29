@@ -1,26 +1,16 @@
-import { createRouter, createWebHistory, type RouterHistory, type RouteLocationNormalized } from "vue-router";
+import { createRouter, createWebHistory, type RouterHistory } from "vue-router";
 import { clearPending } from "./lib/api";
-import { decodeMagnetParam } from "./lib/magnet";
+import DownloadScreen from "./screens/DownloadScreen.vue";
+import FilelistScreen from "./screens/FilelistScreen.vue";
 import HomeScreen from "./screens/HomeScreen.vue";
-import PlaceholderScreen from "./screens/PlaceholderScreen.vue";
 import SearchResultsScreen from "./screens/SearchResultsScreen.vue";
 import SettingsScreen from "./screens/SettingsScreen.vue";
+import TorrentLinkScreen from "./screens/TorrentLinkScreen.vue";
 
 // While both apps coexist the new one is served under /next/ (and /settings).
 // One build serves both; this is removed at cutover.
 export function runtimeBase(pathname: string = window.location.pathname): string {
   return pathname.startsWith("/next/") || pathname === "/next" ? "/next/" : "/";
-}
-
-function placeholder(screen: string) {
-  return (route: RouteLocationNormalized) => {
-    const params: Record<string, string | undefined> = {};
-    for (const [key, value] of Object.entries(route.params)) {
-      const text = Array.isArray(value) ? value.join("/") : value;
-      params[key] = key === "magnet_link" && text ? decodeMagnetParam(text) : text;
-    }
-    return { screen, params };
-  };
 }
 
 export function createAppRouter(history: RouterHistory = createWebHistory(runtimeBase())) {
@@ -29,9 +19,9 @@ export function createAppRouter(history: RouterHistory = createWebHistory(runtim
     routes: [
       { path: "/", name: "home", component: HomeScreen },
       { path: "/search/:searchterm?", name: "search", component: SearchResultsScreen },
-      { path: "/torrent/:torrent_link/", name: "torrent", component: PlaceholderScreen, props: placeholder("torrent-link-screen") },
-      { path: "/magnet/:magnet_link/", name: "filelist", component: PlaceholderScreen, props: placeholder("filelist-screen") },
-      { path: "/magnet/:magnet_link/:filename", name: "download", component: PlaceholderScreen, props: placeholder("download-screen") },
+      { path: "/torrent/:torrent_link/", name: "torrent", component: TorrentLinkScreen },
+      { path: "/magnet/:magnet_link/", name: "filelist", component: FilelistScreen },
+      { path: "/magnet/:magnet_link/:filename", name: "download", component: DownloadScreen },
       { path: "/settings", name: "settings", component: SettingsScreen },
       // Legacy: anything unknown shows the home screen.
       { path: "/:pathMatch(.*)*", name: "fallback", component: HomeScreen },

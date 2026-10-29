@@ -1,12 +1,17 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { createMemoryHistory } from "vue-router";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.vue";
 import * as api from "./lib/api";
 import { encodeMagnetParam } from "./lib/magnet";
 import { createAppRouter, runtimeBase } from "./router";
 
 vi.mock("./components/SettingsPage.vue", () => ({ default: { template: "<div class='settings-stub'>categories</div>" } }));
+
+beforeEach(() => {
+  // The download screens talk to the API as soon as they mount; keep it pending.
+  vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+});
 
 async function visit(path: string) {
   const router = createAppRouter(createMemoryHistory("/next/"));
@@ -44,8 +49,9 @@ describe("router", () => {
     const { router, wrapper } = await visit(`/magnet/${encodeMagnetParam(magnet)}/${encodeURIComponent("a b.mkv")}`);
     expect(router.currentRoute.value.params.filename).toBe("a b.mkv");
     expect(wrapper.vm.$route.params.magnet_link).not.toBe(magnet); // raw param is still encoded once
-    const screen = wrapper.findComponent({ name: "PlaceholderScreen" });
-    expect((screen.props("params") as Record<string, string>).magnet_link).toBe(magnet);
+    const posted = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.find(([url]) => url === "/api/magnet_download/")!;
+    expect((posted[1].body as URLSearchParams).get("magnet_link")).toBe(magnet);
+    expect((posted[1].body as URLSearchParams).get("filename")).toBe("a b.mkv");
 
     const search = await visit("/search/" + encodeURIComponent("a/b c&d"));
     expect(search.router.currentRoute.value.params.searchterm).toBe("a/b c&d");
