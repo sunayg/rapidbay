@@ -59,3 +59,20 @@ test("the Settings shortcut opens settings", async ({ page }) => {
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 });
+
+for (const width of [375, 480, 561, 700, 900, 1024]) {
+  test(`the header fits at ${width}px: search box usable, four buttons visible, nothing scrolls sideways`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto("/");
+    await expect(page.locator(".home-shortcut")).toHaveCount(4);
+    const box = await page.locator("input.form-control").boundingBox();
+    expect(box!.width).toBeGreaterThanOrEqual(width <= 560 ? width - 60 : 150);
+    for (const name of ["History", "Latest releases", "Favorites", "Settings"]) {
+      const b = await page.getByRole("button", { name }).boundingBox();
+      expect(b, name).not.toBeNull();
+      expect(b!.x).toBeGreaterThanOrEqual(0);
+      expect(b!.x + b!.width).toBeLessThanOrEqual(width);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+}

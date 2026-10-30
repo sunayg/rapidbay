@@ -554,3 +554,59 @@ def test_home_charts_fall_back_to_local_chart_when_tmdb_has_nothing():
             patch("app.library.TMDBClient", FakeClient):
         payload = home()
     assert payload["series"] == local and payload["movies"] == []
+
+
+def _home_with_trending(payload_by_type: dict, local: list | None = None) -> dict:
+    from app.library import home
+
+    class FakeClient:
+        def __init__(self, _key: str, _cache: object = None) -> None:
+            return None
+
+        def get_trending(self, media_type: str) -> object:
+            return payload_by_type[media_type]
+
+        def get_image_url(self, path: str | None, size: str = "w185") -> str | None:
+            return None
+
+        def get_tv_details(self, tv_id: int) -> dict | None:
+            return None
+
+    with patch("app.library.settings.TMDB_API_KEY", "key"), \
+            patch("app.library.stats.top", side_effect=lambda m: local or []), \
+            patch("app.library._classify_adult_activity"), \
+            patch("app.library.TMDBClient", FakeClient):
+        return home()
+
+
+def test_trending_chart_is_capped_at_ten_and_ranked_in_order():
+    results = [{"id": i, "name": f"Show {i}"} for i in range(1, 16)]
+    payload = _home_with_trending({"tv": {"results": results}, "movie": {"results": []}})
+    assert [c["rank"] for c in payload["series"]] == list(range(1, 11))
+    assert payload["series"][-1]["title"] == "Show 10"
+
+
+def test_trending_skips_entries_without_id_or_title_and_adult_movies():
+    payload = _home_with_trending({
+        "tv": {"results": [{"name": "No id"}, {"id": 2}, {"id": 3, "name": "Kept"}]},
+        "movie": {"results": [{"id": 4, "title": "Adult", "adult": True}, {"id": 5, "title": "Ok"}]},
+    })
+    assert [c["title"] for c in payload["series"]] == ["Kept"]
+    assert payload["series"][0]["rank"] == 1
+    assert [c["title"] for c in payload["movies"]] == ["Ok"]
+
+
+def test_trending_year_is_none_when_the_date_is_missing_or_bad():
+    payload = _home_with_trending({
+        "tv": {"results": [{"id": 1, "name": "A"}, {"id": 2, "name": "B", "first_air_date": "soon"}]},
+        "movie": {"results": []},
+    })
+    assert [c["year"] for c in payload["series"]] == [None, None]
+
+
+def test_malformed_trending_payloads_fall_back_to_the_local_chart():
+    local = [{"tmdb_id": 3, "media_type": "tv", "title": "Local", "rank": 1}]
+    for bad in (None, {}, {"results": None}, {"results": [None, 5, "x"]}, ["not", "a", "dict"]):
+        payload = _home_with_trending({"tv": bad, "movie": bad}, local)
+        assert payload["series"] == local, bad
+        assert payload["movies"] == local, bad
