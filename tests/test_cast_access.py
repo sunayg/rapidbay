@@ -113,7 +113,7 @@ def session_client(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> TestC
     ladder = hls_ladder.plan_ladder(1280, 720, [720, 480])
     session = hls_sessions.Session(
         id="sid1", key=f"{HASH}/Movie.mkv", source="/in.mkv", directory="/nowhere", duration=12.0,
-        segment_seconds=6, ladder=ladder, src_height=720, has_audio=True, audio_is_aac=False, encoder="libx264",
+        segment_seconds=6, ladder=ladder, src_height=720, has_audio=True, audio_copy=False, encoder="libx264",
     )
     calls: list[bool] = []
 

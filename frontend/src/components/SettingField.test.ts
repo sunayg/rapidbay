@@ -18,6 +18,18 @@ describe("SettingField", () => {
     expect(w.emitted("update:modelValue")!.at(-1)).toEqual([["en", "de"]]);
   });
 
+  it("offers the listed options of a choice and emits the one picked", async () => {
+    const choices = [
+      { value: "dialogue", label: "Dialogue (recommended)" },
+      { value: "nightmode", label: "Night mode" },
+    ];
+    const w = mount(SettingField, { props: { field: field({ kind: "choice", choices }), modelValue: "dialogue" } });
+    expect(w.findAll("option").map((o) => o.text())).toEqual(["Dialogue (recommended)", "Night mode"]);
+    expect((w.find("select").element as HTMLSelectElement).value).toBe("dialogue");
+    await w.find("select").setValue("nightmode");
+    expect(w.emitted("update:modelValue")!.at(-1)).toEqual(["nightmode"]);
+  });
+
   it("shows Reset only for saved values and the pending restart badge", () => {
     const saved = mount(SettingField, { props: { field: field({ source: "saved", pending_restart: true }), modelValue: "a" } });
     expect(saved.text()).toContain("Reset");

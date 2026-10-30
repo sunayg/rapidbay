@@ -9,8 +9,10 @@ from dataclasses import dataclass
 from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
+from hls_ladder import DOWNMIX_CHOICES
+
 Kind = Literal[
-    "bool", "int", "str", "url", "bitrate", "str_list", "int_list", "host_port_list", "regex_list"
+    "bool", "int", "str", "url", "bitrate", "str_list", "int_list", "host_port_list", "regex_list", "choice"
 ]
 
 
@@ -37,6 +39,7 @@ class Field:
     min: int | None = None
     max: int | None = None
     non_empty: bool = False
+    choices: tuple[tuple[str, str], ...] = ()  # (value, label) for a "choice"
 
 
 CATEGORIES: list[tuple[str, str]] = [
@@ -74,7 +77,9 @@ FIELDS: dict[str, Field] = dict(
         _f("MAX_PARALLEL_HLS_STREAMS", "streaming", "int", "Max parallel HLS streams", min=1),
         _f("HLS_PREFETCH_BYTES", "streaming", "int", "Prefetch window (bytes)", min=1),
         _f("AAC_BITRATE", "conversion", "bitrate", "AAC bitrate", help="For example 256k."),
-        _f("AAC_CHANNELS", "conversion", "int", "AAC channels", min=1, max=8),
+        _f("AAC_CHANNELS", "conversion", "int", "AAC channels", min=1, max=8, help="2 mixes surround tracks down to stereo (see Downmix); 6 keeps 5.1."),
+        _f("AUDIO_DOWNMIX", "conversion", "choice", "Downmix", help="How a surround track is mixed down to stereo. The default mix leaves dialogue quiet; the others keep it up front.", choices=DOWNMIX_CHOICES),
+        _f("AUDIO_DOWNMIX_BOOST", "conversion", "int", "Downmix volume (%)", help="Raise or lower a downmixed track. Different mixes come out at different volumes.", min=50, max=300),
         _f("VIDEO_EXTENSIONS", "conversion", "str_list", "Video extensions", help="One per line."),
         _f("SUBTITLE_LANGUAGES", "subtitles", "str_list", "Subtitle languages", help="One per line, for example en."),
         _f("OPENSUBTITLES_USERNAME", "subtitles", "str", "OpenSubtitles username"),
@@ -134,6 +139,10 @@ def coerce(field: Field, wire: Any) -> Any:
         return wire
     if kind == "int":
         return _int(field, wire)
+    if kind == "choice":
+        if wire not in {value for value, _ in field.choices}:
+            raise ValidationError(f"{field.label}: choose one of the listed options")
+        return wire
     if kind in ("str", "url", "bitrate"):
         if not isinstance(wire, str):
             raise ValidationError(f"{field.label}: expected text")

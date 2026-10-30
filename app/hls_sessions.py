@@ -77,7 +77,7 @@ class Session:
     ladder: List[hls_ladder.Rendition]
     src_height: int
     has_audio: bool
-    audio_is_aac: bool
+    audio_copy: bool  # the audio can go into the stream as it is
     encoder: str
     audio_tracks: List[hls_ladder.AudioTrack] = field(default_factory=list)
     growing: GrowingSource | None = None
@@ -208,14 +208,14 @@ class SessionManager:
             has_audio = bool(video_conversion.first_audio_format(source))
             tracks = [hls_ladder.AudioTrack(0, "", "", "")] if has_audio else []
         has_audio = bool(tracks)
-        audio_is_aac = has_audio and all("aac" in t.codec for t in tracks)
+        audio_copy = hls_ladder.can_copy_audio(tracks, settings.AAC_CHANNELS)
         session_id = uuid.uuid4().hex
         directory = os.path.join(self.root, session_id)
         os.makedirs(directory, exist_ok=True)
         session = Session(
             id=session_id, key=key, source=source, directory=directory, duration=duration,
             segment_seconds=settings.HLS_SEGMENT_DURATION, ladder=ladder, src_height=size[1],
-            has_audio=has_audio, audio_is_aac=audio_is_aac, encoder=hls_ladder.detect_encoder(settings.HLS_ENCODER),
+            has_audio=has_audio, audio_copy=audio_copy, encoder=hls_ladder.detect_encoder(settings.HLS_ENCODER),
             audio_tracks=tracks, growing=growing,
         )
         with self._lock:
@@ -281,7 +281,7 @@ class SessionManager:
     def _audio_args(self, session: Session) -> List[str] | None:
         if not session.has_audio:
             return None
-        if session.audio_is_aac:
+        if session.audio_copy:
             return ["-c:a", "copy", "-bsf:a", "aac_adtstoasc"]
         return ["-c:a", "aac", "-b:a", settings.AAC_BITRATE, "-ac", str(settings.AAC_CHANNELS), "-bsf:a", "aac_adtstoasc"]
 
@@ -317,7 +317,8 @@ class SessionManager:
             source = session.growing.final_path
         args = hls_ladder.build_session_args(
             session.ladder, session.src_height, session.encoder, settings.HLS_X264_PRESET,
-            session.segment_seconds, "pipe:0" if piped else source, self._audio_args(session), index, init_prefix, session.audio_tracks,
+            session.segment_seconds, "pipe:0" if piped else source, self._audio_args(session), index, init_prefix, session.audio_tracks, settings.AAC_CHANNELS,
+            settings.AUDIO_DOWNMIX, settings.AUDIO_DOWNMIX_BOOST,
         )
         with open(os.path.join(session.directory, "ffmpeg.log"), "a") as stderr_log:
             session.proc = Popen(

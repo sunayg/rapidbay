@@ -9,7 +9,7 @@ EXPECTED = {
     "TORRENT_UPLOAD_LIMIT", "SUPPORTED_EXTENSIONS", "MAX_OUTPUT_FILE_AGE",
     "HLS_LADDER_HEIGHTS", "HLS_SEGMENT_DURATION", "HLS_START_SECONDS", "MAX_PARALLEL_HLS_STREAMS",
     "HLS_PREFETCH_BYTES",
-    "AAC_BITRATE", "AAC_CHANNELS", "VIDEO_EXTENSIONS",
+    "AAC_BITRATE", "AAC_CHANNELS", "AUDIO_DOWNMIX", "AUDIO_DOWNMIX_BOOST", "VIDEO_EXTENSIONS",
     "SUBTITLE_LANGUAGES", "OPENSUBTITLES_USERNAME", "OPENSUBTITLES_PASSWORD", "TMDB_API_KEY",
     "EXCLUDE_TRACKERS_FROM_TRENDING", "EXCLUDE_CATEGORIES_FROM_TRENDING", "TRENDING_TITLE_BLOCKLIST",
     "TRENDING_BLOCK_NON_LATIN_TITLES",
@@ -19,7 +19,7 @@ EXPECTED = {
 
 def test_every_editable_setting_has_a_field():
     assert set(FIELDS) == EXPECTED
-    assert len(FIELDS) == 30
+    assert len(FIELDS) == 32
     for key in FIELDS:
         assert hasattr(settings, key)
     assert {k for k, f in FIELDS.items() if f.restart_needed} == {"TORRENT_LISTENING_PORT", "DHT_ROUTERS"}
@@ -108,3 +108,16 @@ def test_ladder_heights_are_validated():
         with pytest.raises(ValidationError):
             coerce(f, bad)
     assert to_wire(f, [1080, 720]) == ["1080", "720"]
+
+
+def test_choice_settings_accept_only_their_listed_options():
+    f = FIELDS["AUDIO_DOWNMIX"]
+    assert coerce(f, "nightmode") == "nightmode"
+    for bad in ("loud", "", None, 3):
+        with pytest.raises(ValidationError):
+            coerce(f, bad)
+    boost = FIELDS["AUDIO_DOWNMIX_BOOST"]
+    assert coerce(boost, 150) == 150
+    for bad in (10, 400):
+        with pytest.raises(ValidationError):
+            coerce(boost, bad)

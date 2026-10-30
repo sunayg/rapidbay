@@ -54,6 +54,8 @@ SUBTITLE_LANGUAGES: List[str] = ["en"]  # list of languages, e.g. ["en", "de", "
 # CONVERSION
 AAC_BITRATE: str = "256k"
 AAC_CHANNELS: int = 2
+AUDIO_DOWNMIX: str = "dialogue"  # how surround audio is mixed down to stereo: dialogue, default, dave750 or nightmode
+AUDIO_DOWNMIX_BOOST: int = 100  # percent: volume of a downmixed track
 MAX_OUTPUT_FILE_AGE: int = 10  # hours
 
 OPENSUBTITLES_USERNAME: str | None = None

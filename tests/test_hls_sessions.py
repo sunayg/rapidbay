@@ -8,7 +8,7 @@ def _session(duration=20.0, directory="/tmp/x"):
     ladder = hls_ladder.plan_ladder(1280, 720, [720, 480])
     return hs.Session(
         id="s", key="h/f", source="/in.mkv", directory=directory, duration=duration, segment_seconds=6,
-        ladder=ladder, src_height=720, has_audio=True, audio_is_aac=False, encoder=hls_ladder.SOFTWARE,
+        ladder=ladder, src_height=720, has_audio=True, audio_copy=False, encoder=hls_ladder.SOFTWARE,
     )
 
 

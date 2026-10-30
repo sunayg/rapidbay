@@ -192,6 +192,7 @@ def describe_all() -> dict[str, Any]:
                 "nullable": field.nullable,
                 "min": field.min,
                 "max": field.max,
+                "choices": [{"value": v, "label": label} for v, label in field.choices],
                 "default": None if field.secret else to_wire(field, mod._DEFAULTS[key]) if mod._DEFAULTS[key] is not None else None,
                 "value": None if field.secret else (to_wire(field, running) if running is not None else None),
                 "is_set": bool(running) if field.secret else None,

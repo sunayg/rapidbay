@@ -60,6 +60,72 @@ class AudioTrack:
     codec: str
     language: str  # as tagged in the file, usually a 3-letter code ("" when untagged)
     title: str
+    channels: int = 2
+    layout: str = ""  # ffprobe's name for the channel layout, such as "5.1" or "5.1(side)"
+    profile: str = ""  # "LC", "HE-AAC", ...
+
+    @property
+    def is_plain_aac(self) -> bool:
+        """AAC-LC, which is what the playlist advertises and what every browser plays."""
+        return self.codec == "aac" and self.profile in ("", "LC")
+
+
+# How a surround track is mixed down to stereo. The weights are the gain of each channel group in the
+# result. ffmpeg's own mix gives the centre channel, where the dialogue is, -3 dB and then lowers everything
+# to avoid clipping, which leaves speech 6 to 8 dB quiet; these keep it up front. "dave750" and "nightmode"
+# are the recipes Jellyfin offers (from a Super User answer); "dialogue" is a milder one.
+DOWNMIX_CHOICES = (
+    ("dialogue", "Dialogue (recommended)"),
+    ("default", "Default (ffmpeg's own mix)"),
+    ("dave750", "Dave750"),
+    ("nightmode", "Night mode (strong dialogue)"),
+)
+_RECIPES = {
+    #              centre, front, surround, lfe
+    "dialogue": (1.0, 0.707, 0.5, 0.0),
+    "dave750": (0.5, 0.707, 0.707, 0.5),
+    "nightmode": (1.0, 0.30, 0.30, 0.60),
+}
+# The channels of each layout: (front pair, surround pairs). All have FC and LFE except stereo.
+_LAYOUTS = {
+    "5.1": (("FL", "FR"), [("BL", "BR")]),
+    "5.1(side)": (("FL", "FR"), [("SL", "SR")]),
+    "7.1": (("FL", "FR"), [("BL", "BR"), ("SL", "SR")]),
+}
+
+
+def downmix_filter(track: "AudioTrack", target_channels: int, algorithm: str = "dialogue", boost_percent: int = 100) -> str | None:
+    """An audio filter that mixes a surround track down to stereo, or None when the track needs none.
+
+    `algorithm` is one of DOWNMIX_CHOICES; "default" leaves the mix to ffmpeg. `boost_percent` raises or
+    lowers the result (a limiter catches any peak the boost creates). Layouts with no recipe are left to
+    ffmpeg's default mix.
+    """
+    if target_channels != 2 or track.channels <= 2:
+        return None
+    layout = _LAYOUTS.get(track.layout)
+    boost = max(0.1, boost_percent / 100.0)
+    chain: List[str] = []
+    if layout is not None and algorithm in _RECIPES:
+        centre, front, surround, lfe = _RECIPES[algorithm]
+        (fl, fr), pairs = layout
+        share = surround / len(pairs) if len(pairs) > 1 else surround  # 7.1 splits it between its two pairs
+        terms = {"L": [("FC", centre), (fl, front), ("LFE", lfe)], "R": [("FC", centre), (fr, front), ("LFE", lfe)]}
+        for left, right in pairs:
+            terms["L"].append((left, share))
+            terms["R"].append((right, share))
+        sides = ["FL=" + "+".join(f"{w:g}*{c}" for c, w in terms["L"] if w > 0), "FR=" + "+".join(f"{w:g}*{c}" for c, w in terms["R"] if w > 0)]
+        chain.append("pan=stereo|" + "|".join(sides))
+    if boost != 1.0:
+        chain.append(f"volume={boost:g}")
+    if chain:
+        chain.append("alimiter=limit=0.97")
+    return ",".join(chain) or None
+
+
+def can_copy_audio(tracks: Sequence["AudioTrack"], target_channels: int) -> bool:
+    """Whether the audio can go into the stream as it is: AAC-LC, and no more channels than wanted."""
+    return bool(tracks) and all(t.is_plain_aac and t.channels <= target_channels for t in tracks)
 
 
 def probe_audio_tracks(filepath: str) -> List[AudioTrack] | None:
@@ -68,7 +134,8 @@ def probe_audio_tracks(filepath: str) -> List[AudioTrack] | None:
         result = subprocess.run(
             [
                 "ffprobe", "-v", "error", "-select_streams", "a",
-                "-show_entries", "stream=codec_name:stream_tags=language,title", "-of", "json", filepath,
+                "-show_entries", "stream=codec_name,profile,channels,channel_layout:stream_tags=language,title",
+                "-of", "json", filepath,
             ],
             capture_output=True, timeout=20, check=False,
         )
@@ -82,7 +149,15 @@ def probe_audio_tracks(filepath: str) -> List[AudioTrack] | None:
         tags: Dict[str, Any] = stream.get("tags") or {}
         language = str(tags.get("language") or "")
         tracks.append(
-            AudioTrack(position, str(stream.get("codec_name") or ""), "" if language == "und" else language, str(tags.get("title") or ""))
+            AudioTrack(
+                position,
+                str(stream.get("codec_name") or ""),
+                "" if language == "und" else language,
+                str(tags.get("title") or ""),
+                int(stream.get("channels") or 2),
+                str(stream.get("channel_layout") or ""),
+                str(stream.get("profile") or ""),
+            )
         )
     return tracks
 
@@ -267,6 +342,9 @@ def build_session_args(
     start_segment: int,
     init_prefix: str,
     audio_tracks: Sequence[AudioTrack] = (),
+    audio_channels: int = 2,
+    downmix: str = "dialogue",
+    downmix_boost: int = 100,
 ) -> List[str]:
     """ffmpeg arguments for a seekable session: read `source` by path from `start_segment`.
 
@@ -295,6 +373,13 @@ def build_session_args(
             for _ in ladder:
                 args += ["-map", "0:a:0"]
     args += encode_args(ladder, encoder, preset, segment_seconds, audio_args)
+    if audio_args is not None and "copy" not in audio_args:
+        # Each output audio stream gets the downmix its own source track needs.
+        outputs = list(audio_tracks) if separate else [audio_tracks[0] if audio_tracks else None] * len(ladder)
+        for k, track in enumerate(outputs):
+            mix = downmix_filter(track, audio_channels, downmix, downmix_boost) if track is not None else None
+            if mix:
+                args += [f"-filter:a:{k}", mix]
     if start > 0:
         # Timestamps restart at 0 after -ss; shift them back so segment N sits at N * seconds.
         args += ["-output_ts_offset", str(start)]

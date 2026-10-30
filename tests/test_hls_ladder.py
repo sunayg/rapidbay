@@ -150,3 +150,73 @@ def test_audio_tracks_are_listed_in_the_master_playlist_and_tied_to_every_rendit
     streams = hls_ladder.stream_inf_lines(ladder, "playlist", True, False, audio_group=True)
     assert all('AUDIO="aud"' in line for line in streams[::2])
     assert 'AUDIO' not in hls_ladder.stream_inf_lines(ladder, "playlist", True, False)[0]
+
+
+def _surround(layout="5.1", codec="aac", profile="LC", channels=6, index=0):
+    return hls_ladder.AudioTrack(index, codec, "ita", "", channels, layout, profile)
+
+
+def test_surround_dialogue_gets_full_weight_in_the_stereo_mix():
+    mix = hls_ladder.downmix_filter(_surround(), 2)
+    assert mix == "pan=stereo|FL=1*FC+0.707*FL+0.5*BL|FR=1*FC+0.707*FR+0.5*BR,alimiter=limit=0.97"
+    assert "SL" in hls_ladder.downmix_filter(_surround("5.1(side)"), 2)
+    seven = hls_ladder.downmix_filter(_surround("7.1", channels=8), 2)
+    assert "0.25*BL" in seven and "0.25*SL" in seven  # a 7.1 mix splits the surround share between its pairs
+
+
+def test_no_downmix_when_none_is_needed_or_possible():
+    assert hls_ladder.downmix_filter(_surround("stereo", channels=2), 2) is None  # already stereo
+    assert hls_ladder.downmix_filter(_surround(), 6) is None  # surround was asked for
+    assert hls_ladder.downmix_filter(_surround("quad", channels=4), 2) is None  # no recipe: ffmpeg's default
+
+
+def test_aac_is_only_copied_when_it_is_plain_aac_with_no_more_channels_than_wanted():
+    stereo = _surround("stereo", channels=2)
+    assert hls_ladder.can_copy_audio([stereo], 2)
+    assert not hls_ladder.can_copy_audio([_surround()], 2)  # 5.1 is mixed down, not passed through
+    assert hls_ladder.can_copy_audio([_surround()], 6)  # unless 5.1 was asked for
+    assert not hls_ladder.can_copy_audio([_surround("stereo", profile="HE-AAC", channels=2)], 2)  # advertised as LC
+    assert not hls_ladder.can_copy_audio([_surround("stereo", codec="ac3", profile="", channels=2)], 2)
+    assert not hls_ladder.can_copy_audio([], 2)
+
+
+def test_each_surround_track_is_mixed_down_on_its_own():
+    ladder = plan_ladder(1280, 720, [720])
+    tracks = [_surround(index=0), _surround("stereo", channels=2, index=1), _surround("5.1(side)", index=2)]
+    args = hls_ladder.build_session_args(ladder, 720, SOFTWARE, "veryfast", 6, "/in.mkv", ["-c:a", "aac", "-ac", "2"], 0, "init", tracks, 2)
+    assert "FR=1*FC+0.707*FR+0.5*BR" in args[args.index("-filter:a:0") + 1]
+    assert "-filter:a:1" not in args  # the stereo track is left alone
+    assert "SL" in args[args.index("-filter:a:2") + 1]
+
+
+def test_a_single_surround_track_is_mixed_down_in_every_video_variant():
+    ladder = plan_ladder(1920, 1080, [1080, 720])
+    args = hls_ladder.build_session_args(ladder, 1080, SOFTWARE, "veryfast", 6, "/in.mkv", ["-c:a", "aac", "-ac", "2"], 0, "init", [_surround()], 2)
+    assert "-filter:a:0" in args and "-filter:a:1" in args
+
+
+def test_copied_audio_gets_no_filter():
+    ladder = plan_ladder(1280, 720, [720])
+    args = hls_ladder.build_session_args(ladder, 720, SOFTWARE, "veryfast", 6, "/in.mkv", ["-c:a", "copy"], 0, "init", [_surround()], 2)
+    assert "-filter:a:0" not in args
+
+
+def test_the_downmix_recipes_differ_as_documented():
+    dialogue = hls_ladder.downmix_filter(_surround(), 2, "dialogue")
+    dave = hls_ladder.downmix_filter(_surround(), 2, "dave750")
+    night = hls_ladder.downmix_filter(_surround(), 2, "nightmode")
+    assert "0.5*LFE" in dave and "0.5*FC" in dave and "0.707*BL" in dave  # centre and bass split into both sides
+    assert "LFE" not in dialogue  # the milder recipe leaves the bass channel out
+    assert "0.3*FL" in night and "0.6*LFE" in night and "1*FC" in night  # centre up, everything else down
+
+
+def test_the_default_downmix_leaves_the_mix_to_ffmpeg_but_still_honours_the_boost():
+    assert hls_ladder.downmix_filter(_surround(), 2, "default") is None
+    boosted = hls_ladder.downmix_filter(_surround(), 2, "default", 150)
+    assert boosted == "volume=1.5,alimiter=limit=0.97"
+    assert hls_ladder.downmix_filter(_surround(), 2, "nightmode", 200).count("volume=2") == 1
+
+
+def test_a_boost_never_applies_to_a_track_that_is_not_downmixed():
+    assert hls_ladder.downmix_filter(_surround("stereo", channels=2), 2, "nightmode", 300) is None
+    assert hls_ladder.downmix_filter(_surround(), 6, "nightmode", 300) is None

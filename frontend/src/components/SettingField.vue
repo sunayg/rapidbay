@@ -54,6 +54,9 @@ const id = computed(() => `field-${props.field.key}`);
 
     <input v-if="field.kind === 'bool'" :id="id" type="checkbox" :checked="modelValue === true" @change="emit('update:modelValue', ($event.target as HTMLInputElement).checked)" />
     <input v-else-if="field.kind === 'int'" :id="id" type="number" :min="field.min ?? undefined" :max="field.max ?? undefined" :value="modelValue ?? ''" @input="onNumber" />
+    <select v-else-if="field.kind === 'choice'" :id="id" :value="modelValue ?? ''" @change="emit('update:modelValue', ($event.target as HTMLSelectElement).value)">
+      <option v-for="choice in field.choices ?? []" :key="choice.value" :value="choice.value">{{ choice.label }}</option>
+    </select>
     <textarea v-else-if="isList" :id="id" rows="4" :value="text" @input="onText"></textarea>
     <input
       v-else

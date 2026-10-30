@@ -7,12 +7,15 @@ export type Kind =
   | "str_list"
   | "int_list"
   | "host_port_list"
-  | "regex_list";
+  | "regex_list"
+  | "choice";
 
 export interface FieldInfo {
   key: string;
   category: string;
   kind: Kind;
+  // The options of a "choice".
+  choices?: { value: string; label: string }[];
   label: string;
   help: string;
   secret: boolean;
