@@ -34,11 +34,13 @@ RESUME_AT = 20
 # Keep this many segments behind the viewer, so short rewinds do not trigger a re-encode.
 KEEP_BEHIND = 20
 # A session nobody has requested anything from for this long is closed.
-IDLE_SECONDS = 180
+IDLE_SECONDS = 600
 # How long a request waits for an encode to produce its segment.
 SEGMENT_WAIT_SECONDS = 45
 POLL_SECONDS = 0.1
 PIPE_CHUNK = 256 * 1024
+# An encoder that dies on its own is restarted this many times in a row before the session is given up on.
+MAX_ENCODER_FAILURES = 2
 
 _SEGMENT_RE = re.compile(r"^seg_v(\d+)_(\d{4,})\.m4s$")
 _INIT_RE = re.compile(r"^init_v(\d+)\.mp4$")
@@ -57,6 +59,10 @@ class GrowingSource:
     final_path: str | None = None
 
     def complete(self) -> bool:
+        # The link exists only once the whole file has downloaded, and outlives the torrent: after the
+        # torrent is removed, `available` reads 0 and says nothing about the file.
+        if self.final_path and os.path.exists(self.final_path):
+            return True
         return self.available() >= self.total_size
 
 
@@ -91,6 +97,10 @@ class Session:
     # left over from an earlier playback position cannot pull it back.
     latest: int = 0
     last_request: float = field(default_factory=time.monotonic)
+    # Consecutive times the encoder died on its own; past MAX_ENCODER_FAILURES the session is given up on.
+    failures: int = 0
+    dead: bool = False
+    closed: bool = False
 
     @property
     def separate_audio(self) -> bool:
@@ -180,6 +190,7 @@ class SessionManager:
         self.root = root
         self._sessions: Dict[str, Session] = {}
         self._lock = threading.Lock()
+        self._create_lock = threading.Lock()
         self._watcher: threading.Thread | None = None
         self._closing = False
 
@@ -188,11 +199,20 @@ class SessionManager:
     def create(self, key: str, source: str, start_seconds: float = 0.0, growing: GrowingSource | None = None) -> Session:
         """The session for a file, made on first use; its encode starts at `start_seconds`, where
         the viewer is about to resume. Raises SessionError(reason) when it cannot be made."""
+        # One creation at a time: the probes below take a moment, and two requests for the same file (a double
+        # click, a second device) must not each open a session, nor several files together pass the limit.
+        with self._create_lock:
+            return self._create(key, source, start_seconds, growing)
+
+    def _create(self, key: str, source: str, start_seconds: float, growing: GrowingSource | None) -> Session:
         with self._lock:
             existing = next((s for s in self._sessions.values() if s.key == key), None)
-            if existing:
+            if existing and not existing.dead:
                 existing.last_request = time.monotonic()
                 return existing
+        if existing:
+            self.close(existing.id)  # its encoder gave up: start afresh
+        with self._lock:
             self._make_room()
         if not os.path.isfile(source):
             raise SessionError("file_not_found")
@@ -241,6 +261,7 @@ class SessionManager:
         if session is None:
             return
         with session.lock:
+            session.closed = True
             self._stop_process(session)
         shutil.rmtree(session.directory, ignore_errors=True)
 
@@ -249,10 +270,17 @@ class SessionManager:
         with self._lock:
             return [s.key for s in self._sessions.values()]
 
-    def close_prefix(self, prefix: str) -> None:
-        """Close every session whose file key starts with `prefix` ("hash/" for a torrent, "hash/name" for a file)."""
+    def close_key(self, key: str) -> None:
+        """Close the session of one file ("hash/filename")."""
         with self._lock:
-            ids = [s.id for s in self._sessions.values() if s.key.startswith(prefix)]
+            ids = [s.id for s in self._sessions.values() if s.key == key]
+        for session_id in ids:
+            self.close(session_id)
+
+    def close_torrent(self, magnet_hash: str) -> None:
+        """Close the sessions of every file of a torrent."""
+        with self._lock:
+            ids = [s.id for s in self._sessions.values() if s.key.startswith(f"{magnet_hash}/")]
         for session_id in ids:
             self.close(session_id)
 
@@ -273,6 +301,7 @@ class SessionManager:
 
     def _discard(self, session: Session) -> None:
         with session.lock:
+            session.closed = True
             self._stop_process(session)
         shutil.rmtree(session.directory, ignore_errors=True)
 
@@ -305,6 +334,8 @@ class SessionManager:
 
     def _start_process(self, session: Session, index: int) -> None:
         """Caller holds session.lock."""
+        if session.closed:
+            raise SessionError("closed")  # another request closed it meanwhile; its folder is gone
         self._stop_process(session)
         session.runs += 1
         # The first run's init segments are the ones the playlists point at; later runs write theirs aside.
@@ -405,6 +436,14 @@ class SessionManager:
                 return None
             session.requested = index
             session.latest = index
+        try:
+            return self._wait_for(session, kind, level, index, path, cancelled)
+        except SessionError:
+            return None  # the session was closed under this request
+
+    def _wait_for(
+        self, session: Session, kind: str, level: int, index: int, path: str, cancelled: Callable[[], bool]
+    ) -> str | None:
         if not os.path.isfile(path):
             if kind == "seg":
                 self._ensure_encoding(session, index)
@@ -414,10 +453,15 @@ class SessionManager:
         deadline = time.monotonic() + SEGMENT_WAIT_SECONDS
         while time.monotonic() < deadline and not cancelled():
             if self._ready(session, kind, level, path):
+                session.failures = 0
                 return path
             proc = session.proc
             if proc is not None and proc.poll() not in (None, 0):
-                return None  # the encoder failed
+                # session.proc is only ever the current encoder (a restart clears it before stopping the old
+                # one), so a non-zero exit here is the encoder dying on its own, not being replaced.
+                if not self._recover(session, proc, index):
+                    return None
+                continue
             if kind == "seg" and abs(index - session.latest) > RESTART_GAP:
                 return None  # the viewer has moved on
             if kind == "seg" and (proc is None or proc.poll() is not None):
@@ -428,6 +472,20 @@ class SessionManager:
                 self._ensure_encoding(session, index)
             time.sleep(POLL_SECONDS)
         return path if self._ready(session, kind, level, path) else None
+
+    def _recover(self, session: Session, failed: "Popen[bytes]", index: int) -> bool:
+        """The encoder died by itself: start it again, up to MAX_ENCODER_FAILURES times in a row. Past that,
+        the session is marked dead (create() then replaces it) and the request gets nothing."""
+        with session.lock:
+            if session.proc is not failed:
+                return True  # another request already restarted it
+            session.failures += 1
+            if session.failures > MAX_ENCODER_FAILURES:
+                session.dead = True
+                log.debug(f"HLS session {session.id[:8]}: encoder keeps failing (exit {failed.returncode}), giving up")
+                return False
+            self._start_process(session, index if abs(index - session.latest) <= RESTART_GAP else session.latest)
+            return True
 
     @staticmethod
     def _ready(session: Session, kind: str, level: int, path: str) -> bool:

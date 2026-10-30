@@ -117,7 +117,15 @@ export class FakeHls {
   static isSupported(): boolean {
     return FakeHls.supported;
   }
-  static Events = { ERROR: "hlsError", LEVEL_UPDATED: "hlsLevelUpdated", MANIFEST_PARSED: "hlsManifestParsed" };
+  static Events = {
+    ERROR: "hlsError",
+    LEVEL_UPDATED: "hlsLevelUpdated",
+    MANIFEST_PARSED: "hlsManifestParsed",
+    FRAG_BUFFERED: "hlsFragBuffered",
+    LEVEL_SWITCHED: "hlsLevelSwitched",
+    AUDIO_TRACKS_UPDATED: "hlsAudioTracksUpdated",
+    AUDIO_TRACK_SWITCHED: "hlsAudioTrackSwitched",
+  };
   static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError", OTHER_ERROR: "otherError" };
   listeners = new Map<string, { fn: Listener; once: boolean }[]>();
   loaded: string[] = [];
@@ -127,6 +135,9 @@ export class FakeHls {
     if (this.attached) mediaState(this.attached).currentTime = 0;
   });
   recoverMediaError = vi.fn();
+  startLevel = -1;
+  currentLevel = -1;
+  audioTrack = 0;
   startLoad = vi.fn();
   constructor(public config: Record<string, unknown>) {
     FakeHls.instances.push(this);

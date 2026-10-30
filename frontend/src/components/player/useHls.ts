@@ -173,7 +173,9 @@ export async function attachHls(video: HTMLVideoElement, url: string, options: H
       hls.loadSource(newUrl);
     },
     setQuality(index: number) {
-      if (!dead) hls.currentLevel = index;
+      if (dead) return;
+      holdingStartLevel = false; // the viewer has chosen: the starting hold must not undo it
+      hls.currentLevel = index;
     },
     setAudioTrack(index: number) {
       if (!dead) hls.audioTrack = index;

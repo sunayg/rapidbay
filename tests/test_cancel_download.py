@@ -65,7 +65,7 @@ def test_a_finished_file_is_left_alone():
 
     prioritize.assert_not_called()
     daemon._discard_torrent.assert_not_called()
-    daemon.sessions.close_prefix.assert_not_called()
+    daemon.sessions.close_key.assert_not_called()
 
 
 def test_cancelling_ends_the_files_encode_session():
@@ -73,7 +73,7 @@ def test_cancelling_ends_the_files_encode_session():
 
     _cancel(daemon)
 
-    daemon.sessions.close_prefix.assert_called_once_with(f"{HASH}/a.mkv")
+    daemon.sessions.close_key.assert_called_once_with(f"{HASH}/a.mkv")
 
 
 def test_unknown_torrent_hash_or_file_is_a_no_op():

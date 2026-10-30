@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from threading import Event, Lock, Thread
 from typing import Any, Callable, Dict, List, Set, Tuple
@@ -154,6 +155,9 @@ def _is_safe_subpath(parent: str, child: str) -> bool:
     return os.path.commonpath([parent_abs, child_abs]) == parent_abs
 
 
+# Longest the embedded subtitles of one file are given to come out before it is made ready without the rest.
+_SUBTITLE_EXTRACTION_SECONDS = 600
+
 # The start of a file holds the container headers (tracks, codecs, duration): this much is read first.
 _HEADER_BYTES = 4 * 1024 * 1024
 # What to wait for when the file's length is not known yet or cannot be read.
@@ -230,6 +234,8 @@ class RapidBayDaemon:
         # Last deadline-rush of a file's head window, keyed by (magnet_hash, filename);
         # throttles _rush_hls_head.
         self._head_rushes: Dict[Tuple[str, str], float] = {}
+        # Files being finished (subtitles extracted, then linked into the output folder) on their own threads.
+        self._finishing: Set[Tuple[str, str]] = set()
         # Files handed to libtorrent as web seeds (BEP19) from a debrid cache
         # (Real-Debrid / TorBox). libtorrent stays the sole writer and fetches
         # the file from the web seed and/or peers transparently; tracked only so
@@ -339,7 +345,7 @@ class RapidBayDaemon:
         """Drop a torrent and everything downloaded for it."""
         # End any encode session first; otherwise its ffmpeg and feeder outlive
         # remove_files=True and wait forever for bytes that will never arrive.
-        self.sessions.close_prefix(f"{magnet_hash}/")
+        self.sessions.close_torrent(magnet_hash)
         for f in torrent.get_torrent_info(h).files():
             filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
             self.subtitle_downloads.pop(filepath, None)
@@ -375,7 +381,7 @@ class RapidBayDaemon:
             for subtitle_index in _subtitle_indexes(h, filename):
                 priorities[subtitle_index] = 0
             torrent.prioritize_files(h, priorities)
-            self.sessions.close_prefix(f"{magnet_hash}/{filename}")
+            self.sessions.close_key(f"{magnet_hash}/{filename}")
             self._head_rushes.pop((magnet_hash, filename), None)
             self._web_seeded.get(magnet_hash, set()).discard(filename)
             if not any(priorities):
@@ -568,6 +574,37 @@ class RapidBayDaemon:
         )
         return "\n".join(lines) + "\n"
 
+    def _finish_file(self, magnet_hash: str, filename: str, filepath: str, output_filepath: str) -> None:
+        """Extract a downloaded file's embedded subtitles and link it into the output folder (which makes it
+        ready), on a thread of its own: extraction reads the whole file, which can take minutes, and the
+        heartbeat must keep looking after every other torrent meanwhile."""
+        key = (magnet_hash, filename)
+        if key in self._finishing:
+            return
+        self._finishing.add(key)
+        threading.Thread(
+            target=self._extract_and_link, args=(key, filepath, output_filepath), daemon=True
+        ).start()
+
+    @log.catch_and_log_exceptions
+    def _extract_and_link(self, key: Tuple[str, str], filepath: str, output_filepath: str) -> None:
+        try:
+            output_dir = os.path.dirname(output_filepath)
+            os.makedirs(output_dir, exist_ok=True)
+            # Embedded text subtitles become VTT files before the file counts as ready.
+            try:
+                extraction = video_conversion.extract_subtitles_as_vtt(filepath, output_dir)
+                try:
+                    extraction.wait(timeout=_SUBTITLE_EXTRACTION_SECONDS)
+                except subprocess.TimeoutExpired:
+                    extraction.kill()  # not left running on, writing subtitles after the file is playable
+            except Exception as e:
+                log.debug(f"Subtitle extraction failed for {filepath}: {e}")
+            _link_or_copy(filepath, output_filepath)
+            self._notify_state_change()
+        finally:
+            self._finishing.discard(key)
+
     def _playback_mode(self, output_filepath: str) -> str:
         """"direct" when the browser can play the file as it is, "session" when it needs an encode session."""
         mode = self._playback_modes.get(output_filepath)
@@ -717,13 +754,7 @@ class RapidBayDaemon:
                 if not os.path.isfile(filepath):
                     log.debug(f"File not found for copy, skipping: {filepath}")
                     continue
-                output_file_dir = os.path.dirname(output_filepath)
-                os.makedirs(output_file_dir, exist_ok=True)
-                # Embedded text subtitles become VTT files before the file counts as ready.
-                with contextlib.suppress(Exception):
-                    video_conversion.extract_subtitles_as_vtt(filepath, output_file_dir).wait(timeout=120)
-                _link_or_copy(filepath, output_filepath)
-                self._notify_state_change()
+                self._finish_file(magnet_hash, filename, filepath, output_filepath)
 
     @log.catch_and_log_exceptions
     def _heartbeat(self) -> None:

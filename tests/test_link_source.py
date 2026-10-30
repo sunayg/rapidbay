@@ -36,3 +36,60 @@ def test_a_stale_partial_file_does_not_block_linking(tmp_path):
     (tmp_path / f"b.mkv.{os.getpid()}.part").write_bytes(b"left over")
     _link_or_copy(str(source), str(destination))
     assert destination.read_bytes() == b"1"
+
+
+def test_finishing_a_file_extracts_subtitles_then_links_it_once(tmp_path, monkeypatch):
+    import threading
+
+    daemon = rapidbaydaemon.RapidBayDaemon.__new__(rapidbaydaemon.RapidBayDaemon)
+    daemon._finishing = set()
+    daemon._notify_state_change = lambda: None
+    source = tmp_path / "dl" / "Movie.mkv"
+    source.parent.mkdir()
+    source.write_bytes(b"data")
+    output = tmp_path / "out" / "Movie.mkv"
+    order: list[str] = []
+    gate = threading.Event()
+
+    class Extraction:
+        def wait(self, timeout=None):
+            order.append("extract")
+            gate.wait(2)  # slow: the heartbeat must not be waiting for this
+
+        def kill(self):
+            order.append("kill")
+
+    monkeypatch.setattr(rapidbaydaemon.video_conversion, "extract_subtitles_as_vtt", lambda f, d: Extraction())
+    key = ("h" * 40, "Movie.mkv")
+    daemon._finish_file(*key, str(source), str(output))
+    daemon._finish_file(*key, str(source), str(output))  # the next heartbeat asks again: nothing new starts
+    assert key in daemon._finishing and not output.exists()  # extraction in progress, nothing linked yet
+    gate.set()
+    for _ in range(100):
+        if output.exists() and key not in daemon._finishing:
+            break
+        threading.Event().wait(0.02)
+    assert output.read_bytes() == b"data" and order == ["extract"] and key not in daemon._finishing
+
+
+def test_a_stuck_subtitle_extraction_is_killed_and_the_file_is_linked_anyway(tmp_path, monkeypatch):
+    import subprocess
+
+    daemon = rapidbaydaemon.RapidBayDaemon.__new__(rapidbaydaemon.RapidBayDaemon)
+    daemon._finishing = {("h" * 40, "Movie.mkv")}
+    daemon._notify_state_change = lambda: None
+    source = tmp_path / "Movie.mkv"
+    source.write_bytes(b"data")
+    output = tmp_path / "out" / "Movie.mkv"
+    killed: list[bool] = []
+
+    class Stuck:
+        def wait(self, timeout=None):
+            raise subprocess.TimeoutExpired("ffmpeg", timeout)
+
+        def kill(self):
+            killed.append(True)
+
+    monkeypatch.setattr(rapidbaydaemon.video_conversion, "extract_subtitles_as_vtt", lambda f, d: Stuck())
+    daemon._extract_and_link(("h" * 40, "Movie.mkv"), str(source), str(output))
+    assert killed == [True] and output.read_bytes() == b"data" and not daemon._finishing

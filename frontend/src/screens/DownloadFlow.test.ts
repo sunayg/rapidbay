@@ -488,23 +488,41 @@ describe("download screen", () => {
     expect(posts("/api/magnet/")).toHaveLength(0);
   });
 
-  it("falls back to the progress view when playback fails, and does not retry the session", async () => {
-    handlers[SESSION] = () => ({ url: "/api/hls/abc123/master.m3u8" });
+  it("opens a new session once when the first one has gone, then falls back if that fails too", async () => {
+    let n = 0;
+    handlers[SESSION] = () => ({ url: `/api/hls/session-${++n}/master.m3u8` });
     const { wrapper } = await download();
     const source = FakeEventSource.last("/api/magnet_events/");
     source.emit(info({ can_stream: true }));
     await flushPromises();
+    expect(wrapper.findComponent({ name: "PlayerHost" }).props("url")).toBe("/api/hls/session-1/master.m3u8");
+    // The session closed while the viewer was away; the player gives up on it.
+    wrapper.findComponent({ name: "PlayerHost" }).vm.$emit("stream-error");
+    await flushPromises();
+    expect(posts(SESSION)).toHaveLength(2);
+    expect(wrapper.findComponent({ name: "PlayerHost" }).props("url")).toBe("/api/hls/session-2/master.m3u8");
+    // The new one fails at once as well: a real problem, so back to the progress view and no more tries.
     wrapper.findComponent({ name: "PlayerHost" }).vm.$emit("stream-error");
     await flushPromises();
     expect(wrapper.findComponent({ name: "PlayerHost" }).exists()).toBe(false);
     source.emit(info({ can_stream: true }));
     await flushPromises();
     expect(wrapper.findComponent({ name: "PlayerHost" }).exists()).toBe(false);
-    expect(posts(SESSION)).toHaveLength(1);
+    expect(posts(SESSION)).toHaveLength(2);
     // a directly playable MP4 is still welcome
     source.emit(info({ status: "ready", filename: "a.mp4", supported: true, playback: "direct" }));
     await flushPromises();
     expect(wrapper.findComponent({ name: "PlayerHost" }).exists()).toBe(true);
+  });
+
+  it("does not reopen anything when a plain MP4 fails to play", async () => {
+    const { wrapper } = await download();
+    FakeEventSource.last("/api/magnet_events/").emit(info({ status: "ready", filename: "a.mp4", supported: true, playback: "direct" }));
+    await flushPromises();
+    wrapper.findComponent({ name: "PlayerHost" }).vm.$emit("stream-error");
+    await flushPromises();
+    expect(posts(SESSION)).toHaveLength(0);
+    expect(wrapper.findComponent({ name: "PlayerHost" }).exists()).toBe(false);
   });
 
   it("back from the player returns to the file list", async () => {

@@ -157,9 +157,19 @@ async function cancelDownload(): Promise<void> {
   if (alive) goBack();
 }
 
-// HLS playback failed (e.g. unsupported codec): drop back to the progress view.
+// Playback failed. A session closes on the server after sitting idle (a long pause), so the first failure of a
+// session link opens a new one where the viewer was; a second one soon after means a real problem (an
+// unsupported codec, a broken file): drop back to the progress view.
+let lastReopen = 0;
 function onStreamError(): void {
+  const failed = playLink.value;
   playLink.value = null;
+  if (failed && failed.startsWith("/api/hls/") && Date.now() - lastReopen > 30_000) {
+    lastReopen = Date.now();
+    sessionRequested = false;
+    void openSession(status.value === "ready");
+    return;
+  }
   hlsFailed.value = true;
 }
 
@@ -212,6 +222,7 @@ watch([magnet, filename], () => {
   subtitles.value = [];
   hlsFailed.value = false;
   sessionRequested = false;
+  lastReopen = 0;
   streamMessage.value = null;
   cancelling.value = false;
   heading.value = "";

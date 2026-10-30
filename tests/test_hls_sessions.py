@@ -2,6 +2,7 @@ import os
 
 import hls_ladder
 import hls_sessions as hs
+import pytest
 
 
 def _session(duration=20.0, directory="/tmp/x"):
@@ -185,7 +186,6 @@ def test_a_download_in_progress_is_encoded_from_a_pipe_and_a_finished_one_by_pat
     session = _session(directory=str(tmp_path))
     session.source = str(tmp_path / "missing-download.mkv")  # the download folder is gone
     final = tmp_path / "final.mkv"
-    final.write_bytes(b"x")
     arrived = [10]
     session.growing = hs.GrowingSource(total_size=100, available=lambda: arrived[0], final_path=str(final))
     launched: list[tuple[list[str], object]] = []
@@ -210,6 +210,7 @@ def test_a_download_in_progress_is_encoded_from_a_pipe_and_a_finished_one_by_pat
     args, stdin = launched[-1]
     assert args[args.index("-i") + 1] == "pipe:0" and stdin == hs.PIPE
 
+    final.write_bytes(b"x")  # the file has been linked: complete, whatever the torrent reports
     arrived[0] = 100  # complete: read the file by path, so seeking works, from where it now lives
     manager._start_process(session, 4)
     args, stdin = launched[-1]
@@ -217,15 +218,17 @@ def test_a_download_in_progress_is_encoded_from_a_pipe_and_a_finished_one_by_pat
     assert args[args.index("-ss") + 1] == "24"
 
 
-def test_sessions_for_a_torrent_or_file_are_closed_by_prefix(tmp_path):
+def test_a_file_is_closed_by_its_exact_key_and_a_torrent_by_its_hash(tmp_path):
     manager = hs.SessionManager(str(tmp_path))
-    for name in ("h1/a.mkv", "h1/b.mkv", "h2/a.mkv"):
+    for name in ("h1/a.mkv", "h1/a.mkv.part2", "h1/b.mkv", "h2/a.mkv"):
         s = _session(directory=str(tmp_path / name.replace("/", "_")))
         s.id, s.key = name, name
         manager._sessions[name] = s
-    manager.close_prefix("h1/a.mkv")
-    assert sorted(manager.keys()) == ["h1/b.mkv", "h2/a.mkv"]
-    manager.close_prefix("h1/")
+    manager.close_key("h1/a.mkv")  # not h1/a.mkv.part2, which only starts the same way
+    assert sorted(manager.keys()) == ["h1/a.mkv.part2", "h1/b.mkv", "h2/a.mkv"]
+    manager.close_torrent("h1")
+    assert manager.keys() == ["h2/a.mkv"]
+    manager.close_torrent("h")  # a hash that is only the start of another does not match
     assert manager.keys() == ["h2/a.mkv"]
 
 
@@ -303,3 +306,168 @@ def test_segments_are_sent_as_soon_as_they_exist(tmp_path, monkeypatch):
     monkeypatch.setattr(manager, "_ensure_encoding", lambda s, i: None)
     (tmp_path / hs.segment_name(0, 0)).write_bytes(b"x")
     assert manager.file_for(session, hs.segment_name(0, 0)) == str(tmp_path / hs.segment_name(0, 0))
+
+
+def test_a_download_is_complete_once_its_link_exists_even_if_the_torrent_is_gone(tmp_path):
+    final = tmp_path / "final.mkv"
+    growing = hs.GrowingSource(total_size=100, available=lambda: 0, final_path=str(final))  # torrent removed: reads 0
+    assert not growing.complete()
+    final.write_bytes(b"x")
+    assert growing.complete()
+    assert not hs.GrowingSource(total_size=100, available=lambda: 99).complete()
+    assert hs.GrowingSource(total_size=100, available=lambda: 100).complete()
+
+
+class _Proc:
+    def __init__(self, returncode=None):
+        self.returncode = returncode
+        self.pid = 1
+
+    def poll(self):
+        return self.returncode
+
+
+def _failing_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(hs, "SEGMENT_WAIT_SECONDS", 3)
+    monkeypatch.setattr(hs, "POLL_SECONDS", 0.01)
+    manager = hs.SessionManager(str(tmp_path))
+    session = _session(duration=600.0, directory=str(tmp_path))
+    session.runs = 1
+    session.proc = _Proc(1)  # the encoder died on its own
+    starts: list[int] = []
+
+    def start(s, i):
+        starts.append(i)
+        s.proc = _Proc(1)  # and it dies again each time
+
+    monkeypatch.setattr(manager, "_start_process", start)
+    return manager, session, starts
+
+
+def test_an_encoder_that_dies_is_restarted_a_few_times_and_then_the_session_is_given_up_on(tmp_path, monkeypatch):
+    manager, session, starts = _failing_session(tmp_path, monkeypatch)
+    session.latest = 3
+    assert manager.file_for(session, hs.segment_name(0, 3)) is None
+    # one start for the request itself, then a restart per failure up to the limit
+    assert starts == [3] * (1 + hs.MAX_ENCODER_FAILURES)
+    assert session.dead
+
+
+def test_an_encoder_that_recovers_serves_the_segment_and_clears_the_count(tmp_path, monkeypatch):
+    manager, session, starts = _failing_session(tmp_path, monkeypatch)
+    session.latest = 3
+
+    def start(s, i):
+        starts.append(i)
+        s.proc = _Proc(None)
+        (tmp_path / hs.segment_name(0, 3)).write_bytes(b"x")  # this time it produces the segment
+
+    monkeypatch.setattr(manager, "_start_process", start)
+    assert manager.file_for(session, hs.segment_name(0, 3)) == str(tmp_path / hs.segment_name(0, 3))
+    assert starts == [3] and session.failures == 0 and not session.dead
+
+
+def test_a_dead_session_is_replaced_not_reused(tmp_path, monkeypatch):
+    manager = hs.SessionManager(str(tmp_path))
+    old = _session(directory=str(tmp_path / "old"))
+    old.id, old.key, old.dead = "old", "h/f", True
+    manager._sessions["old"] = old
+    (tmp_path / "old").mkdir()
+    made = _session(directory=str(tmp_path / "new"))
+    made.id, made.key = "new", "h/f"
+
+    def build(source, start):
+        return made
+
+    monkeypatch.setattr(hs.os.path, "isfile", lambda p: True)
+    monkeypatch.setattr(hs, "probe_duration", lambda p: 60.0)
+    monkeypatch.setattr(hs.hls_ladder, "probe_video_size", lambda p: (1280, 720))
+    monkeypatch.setattr(hs.hls_ladder, "probe_audio_tracks", lambda p: [])
+    monkeypatch.setattr(hs.hls_ladder, "detect_encoder", lambda p: hls_ladder.SOFTWARE)
+    monkeypatch.setattr(manager, "_start_process", lambda s, i: None)
+    monkeypatch.setattr(manager, "_ensure_watcher", lambda: None)
+    fresh = manager.create("h/f", "/in.mkv", 0.0)
+    assert fresh.id != "old" and "old" not in manager._sessions
+    assert manager.create("h/f", "/in.mkv", 0.0) is fresh  # a healthy one is reused
+
+
+def test_two_requests_for_one_file_open_one_session(tmp_path, monkeypatch):
+    import threading
+    import time as _time
+
+    manager = hs.SessionManager(str(tmp_path / "s"))
+    monkeypatch.setattr(hs.os.path, "isfile", lambda p: True)
+    monkeypatch.setattr(hs, "probe_duration", lambda p: (_time.sleep(0.15), 60.0)[1])  # a slow probe, to overlap
+    monkeypatch.setattr(hs.hls_ladder, "probe_video_size", lambda p: (1280, 720))
+    monkeypatch.setattr(hs.hls_ladder, "probe_audio_tracks", lambda p: [])
+    monkeypatch.setattr(hs.hls_ladder, "detect_encoder", lambda p: hls_ladder.SOFTWARE)
+    monkeypatch.setattr(manager, "_start_process", lambda s, i: None)
+    monkeypatch.setattr(manager, "_ensure_watcher", lambda: None)
+    results: list[hs.Session] = []
+    threads = [threading.Thread(target=lambda: results.append(manager.create("h/f", "/in.mkv", 0.0))) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(manager.keys()) == 1 and len({id(r) for r in results}) == 1
+
+
+def test_a_request_on_a_closed_session_gets_nothing_instead_of_an_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(hs, "SEGMENT_WAIT_SECONDS", 0.3)
+    manager = hs.SessionManager(str(tmp_path))
+    session = _session(directory=str(tmp_path / "gone"))  # its folder is already removed
+    session.closed = True
+    session.latest = 2
+    assert manager.file_for(session, hs.segment_name(0, 2)) is None
+    with pytest.raises(hs.SessionError):
+        manager._start_process(session, 2)
+
+
+class _SignalProc(_Proc):
+    def __init__(self):
+        super().__init__(None)
+        self.signals: list[int] = []
+
+    def send_signal(self, sig):
+        self.signals.append(sig)
+
+
+def _running(tmp_path, produced, requested):
+    manager = hs.SessionManager(str(tmp_path))
+    session = _session(duration=3000.0, directory=str(tmp_path))
+    session.proc = _SignalProc()
+    session.start_segment = 0
+    session.requested = requested
+    for i in range(produced):
+        (tmp_path / hs.segment_name(0, i)).write_bytes(b"x")
+    return manager, session
+
+
+def test_the_encoder_is_paused_when_far_ahead_of_the_viewer_and_resumed_as_they_catch_up(tmp_path):
+    import signal
+
+    manager, session = _running(tmp_path, produced=40, requested=2)  # 38 ahead: more than PAUSE_AHEAD
+    manager._tend(session)
+    assert session.paused and session.proc.signals == [signal.SIGSTOP]
+    manager._tend(session)  # still far ahead: not paused twice
+    assert session.proc.signals == [signal.SIGSTOP]
+    session.requested = 25  # 15 ahead: within RESUME_AT
+    manager._tend(session)
+    assert not session.paused and session.proc.signals == [signal.SIGSTOP, signal.SIGCONT]
+
+
+def test_the_encoder_keeps_running_while_the_viewer_is_close_behind(tmp_path):
+    manager, session = _running(tmp_path, produced=12, requested=5)
+    manager._tend(session)
+    assert not session.paused and session.proc.signals == []
+
+
+def test_a_session_nobody_has_asked_for_is_closed_and_its_folder_removed(tmp_path):
+    manager = hs.SessionManager(str(tmp_path))
+    directory = tmp_path / "idle"
+    directory.mkdir()
+    session = _session(directory=str(directory))
+    manager._sessions[session.id] = session
+    session.last_request -= hs.IDLE_SECONDS + 5
+    manager._tend(session)
+    assert manager.keys() == [] and not directory.exists() and session.closed
