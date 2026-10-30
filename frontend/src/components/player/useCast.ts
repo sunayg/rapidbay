@@ -71,6 +71,8 @@ const LOCAL_HOST = /^(localhost|127(\.\d+){3}|\[?::1\]?)$/;
 
 export interface CastRequest {
   videoUrl: string;
+  // The torrent's hash, for a video played from an encode session (its URL does not carry it).
+  magnetHash?: string;
   title: string;
   video: HTMLVideoElement | null;
   cc: ChromecastLike | null;
@@ -83,7 +85,8 @@ export async function castVideo(request: CastRequest): Promise<string | null> {
   if (LOCAL_HOST.test(window.location.hostname)) {
     return "Open RapidBay by its network address to cast. A TV cannot reach localhost.";
   }
-  const parts = /^\/play\/([^/]+)\/(.*)$/.exec(request.videoUrl || "");
+  const session = /^\/api\/hls\/([^/]+)\/master\.m3u8$/.exec(request.videoUrl || "");
+  const parts = session ? (request.magnetHash ? [request.videoUrl, request.magnetHash] : null) : /^\/play\/([^/]+)\/(.*)$/.exec(request.videoUrl || "");
   if (!parts) return "This video cannot be cast.";
   let prefix: string;
   try {
@@ -105,7 +108,7 @@ export async function castVideo(request: CastRequest): Promise<string | null> {
   return new Promise((resolve) => {
     cc.cast(
       {
-        content: castUrl(request.videoUrl) as string,
+        content: session ? prefix + "session/" + session[1] + "/master.m3u8" : (castUrl(request.videoUrl) as string),
         title: request.title || "RapidBay",
         subtitles,
         time: video.currentTime || 0,

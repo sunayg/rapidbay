@@ -3,7 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from "vue";
 import { castVideo, loadCast, type CastLoader, type ChromecastLike } from "./useCast";
 
 const props = withDefaults(
-  defineProps<{ videoUrl: string; mediaTitle: string; video: HTMLVideoElement | null; loader?: CastLoader }>(),
+  defineProps<{ videoUrl: string; magnetHash?: string; mediaTitle: string; video: HTMLVideoElement | null; loader?: CastLoader }>(),
   { loader: loadCast },
 );
 
@@ -30,7 +30,7 @@ function showError(message: string): void {
 }
 
 async function cast(): Promise<void> {
-  const problem = await castVideo({ videoUrl: props.videoUrl, title: props.mediaTitle, video: props.video, cc });
+  const problem = await castVideo({ videoUrl: props.videoUrl, magnetHash: props.magnetHash, title: props.mediaTitle, video: props.video, cc });
   if (problem && alive) showError(problem);
 }
 </script>

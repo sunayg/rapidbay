@@ -649,13 +649,13 @@ class RapidBayDaemon:
             return {"session": None, "reason": e.reason}
         return {"session": session.id}
 
-    def session_master_playlist(self, session_id: str, magnet_hash: str, filename: str) -> str | None:
+    def session_master_playlist(self, session_id: str, magnet_hash: str, filename: str, subtitles: bool = True) -> str | None:
         """Master playlist of a session: every quality level, plus the file's subtitles."""
         session = self.sessions.get(session_id)
         if session is None:
             return None
         output_dir = _get_output_dir(magnet_hash)
-        vtts = _get_vtt_subtitles(output_dir, os.path.basename(_get_output_filepath(magnet_hash, filename)))
+        vtts = _get_vtt_subtitles(output_dir, os.path.basename(_get_output_filepath(magnet_hash, filename))) if subtitles else []
         lines = ["#EXTM3U", "#EXT-X-VERSION:7"]
         lines += video_conversion.subtitle_media_lines(output_dir, vtts, uri_base=f"/play/{magnet_hash}/")
         lines += hls_ladder.stream_inf_lines(session.ladder, "playlist", session.has_audio, bool(vtts))

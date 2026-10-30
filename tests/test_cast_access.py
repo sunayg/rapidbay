@@ -93,3 +93,62 @@ def test_cast_link_cannot_escape_the_output_directory(client: TestClient) -> Non
 
     assert response.status_code == 404
     assert b"nope" not in response.content
+
+
+class _FakeSessions:
+    def __init__(self, session: object) -> None:
+        self._session = session
+
+    def get(self, session_id: str) -> object | None:
+        return self._session if session_id == "sid1" else None
+
+
+@pytest.fixture
+def session_client(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    from types import SimpleNamespace
+
+    import hls_ladder
+    import hls_sessions
+
+    ladder = hls_ladder.plan_ladder(1280, 720, [720, 480])
+    session = hls_sessions.Session(
+        id="sid1", key=f"{HASH}/Movie.mkv", source="/in.mkv", directory="/nowhere", duration=12.0,
+        segment_seconds=6, ladder=ladder, src_height=720, has_audio=True, audio_is_aac=False, encoder="libx264",
+    )
+    calls: list[bool] = []
+
+    def master(session_id: str, magnet_hash: str, filename: str, subtitles: bool = True) -> str:
+        calls.append(subtitles)
+        return "#EXTM3U\nplaylist_v0.m3u8\n"
+
+    monkeypatch.setattr(app_module, "daemon", SimpleNamespace(sessions=_FakeSessions(session), session_master_playlist=master), raising=False)
+    client.subtitle_calls = calls  # type: ignore[attr-defined]
+    return client
+
+
+def test_a_chromecast_can_load_an_encode_session_with_the_signed_link(session_client: TestClient) -> None:
+    token = _prefix(session_client).split("/")[2]
+    base = f"/cast/{token}/{HASH}/session/sid1"
+
+    master = session_client.get(f"{base}/master.m3u8")
+    variant = session_client.get(f"{base}/playlist_v1.m3u8")
+
+    assert master.status_code == 200
+    assert master.headers["content-type"].startswith("application/vnd.apple.mpegurl")
+    assert master.headers["access-control-allow-origin"] == "*"
+    assert session_client.subtitle_calls == [False]  # type: ignore[attr-defined]  # the sender brings the subtitles
+    assert variant.status_code == 200 and variant.text.count("#EXTINF") == 2
+    assert session_client.get(f"{base}/playlist_v9.m3u8").status_code == 404
+
+
+def test_a_cast_session_link_is_refused_for_the_wrong_token_torrent_or_session(session_client: TestClient) -> None:
+    token = _prefix(session_client).split("/")[2]
+    other = "b" * 40
+
+    assert session_client.get(f"/cast/{token}/{HASH}/session/nope/master.m3u8").status_code == 404
+    assert session_client.get(f"/cast/{token}/{other}/session/sid1/master.m3u8").status_code == 404
+    altered = token[:-1] + ("1" if token[-1] == "0" else "0")
+    assert session_client.get(f"/cast/{altered}/{HASH}/session/sid1/master.m3u8").status_code == 404
+    # A token for another torrent cannot open this torrent's session.
+    other_token = cast_access.make_token(other)
+    assert session_client.get(f"/cast/{other_token}/{other}/session/sid1/master.m3u8").status_code == 404

@@ -1269,15 +1269,11 @@ def open_session(magnet_hash: str, filename: str, start: float = 0.0, _: None = 
 _PLAYLIST_RE = re.compile(r"^playlist_v(\d+)\.m3u8$")
 
 
-@app.get("/api/hls/{session_id}/{name}")
-def session_file(session_id: str, name: str, _: None = Depends(authorize)) -> Response:
-    session = daemon.sessions.get(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session expired")
+def _session_response(session: hls_sessions.Session, name: str, subtitles: bool = True) -> Response:
     mpegurl = "application/vnd.apple.mpegurl"
     if name == "master.m3u8":
         magnet_hash, _slash, filename = session.key.partition("/")
-        text = daemon.session_master_playlist(session_id, magnet_hash, filename)
+        text = daemon.session_master_playlist(session.id, magnet_hash, filename, subtitles)
         if text is None:
             raise HTTPException(status_code=404, detail="Session expired")
         return Response(text, media_type=mpegurl, headers={"Cache-Control": "no-store"})
@@ -1291,6 +1287,14 @@ def session_file(session_id: str, name: str, _: None = Depends(authorize)) -> Re
     if path is None:
         raise HTTPException(status_code=404)
     return FileResponse(path, media_type="video/mp4")
+
+
+@app.get("/api/hls/{session_id}/{name}")
+def session_file(session_id: str, name: str, _: None = Depends(authorize)) -> Response:
+    session = daemon.sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session expired")
+    return _session_response(session, name)
 
 
 def _file_status(magnet_hash: str, filename: str) -> Dict[str, Any]:
@@ -1526,6 +1530,20 @@ class CastLinkResponse(BaseModel):
 def cast_link(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, str]:
     """Path prefix a Chromecast can use for this torrent's files without logging in."""
     return {"prefix": f"/cast/{cast_access.make_token(magnet_hash)}/{magnet_hash}/"}
+
+
+@app.get("/cast/{token}/{magnet_hash}/session/{session_id}/{name}")
+def cast_session_file(token: str, magnet_hash: str, session_id: str, name: str) -> Response:
+    """An encode session for a Chromecast, which cannot log in: the signed token covers the torrent."""
+    if not cast_access.verify_token(token, magnet_hash):
+        raise HTTPException(status_code=404)
+    session = daemon.sessions.get(session_id)
+    if session is None or not session.key.startswith(f"{magnet_hash}/"):
+        raise HTTPException(status_code=404)
+    # The sender passes subtitles itself, so the playlist carries none.
+    response = _session_response(session, name, subtitles=False)
+    response.headers["Access-Control-Allow-Origin"] = "*"  # as the other cast files, for the receiver
+    return response
 
 
 @app.get("/cast/{token}/{magnet_hash}/{filename:path}")

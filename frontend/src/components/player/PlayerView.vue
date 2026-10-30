@@ -12,7 +12,7 @@ import {
   reportPlaybackProgress,
   saveVideoPosition,
 } from "../../lib/library";
-import { magnetPath, rememberEpisodeTarget, torrentPath } from "../../lib/magnet";
+import { get_hash, magnetPath, rememberEpisodeTarget, torrentPath } from "../../lib/magnet";
 import FavoriteButton from "../FavoriteButton.vue";
 import CaptionButton from "./CaptionButton.vue";
 import CastButton from "./CastButton.vue";
@@ -511,7 +511,7 @@ onBeforeUnmount(() => {
         <span v-if="statusLabel" class="player-badge-status">{{ statusLabel }}</span>
       </span>
       <div v-if="supported" class="player-top-actions">
-        <CastButton v-if="showCast" :video-url="url" :media-title="displayTitle" :video="video" />
+        <CastButton v-if="showCast" :video-url="url" :magnet-hash="get_hash(magnet)" :media-title="displayTitle" :video="video" />
         <FavoriteButton :magnet="magnet" :filename="filename" />
       </div>
     </header>
