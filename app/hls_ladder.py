@@ -10,7 +10,7 @@ import json
 import os
 import subprocess
 from dataclasses import dataclass
-from typing import List, Sequence
+from typing import Any, Callable, Dict, List, Sequence
 
 # Video bitrate (kbit/s) for the usual heights; other heights are interpolated.
 _BITRATE_BY_HEIGHT = {2160: 14000, 1440: 8000, 1080: 5000, 720: 2800, 480: 1400, 360: 800, 240: 400}
@@ -50,6 +50,41 @@ class Rendition:
     @property
     def playlist_suffix(self) -> str:
         return f"_v{self.index}.m3u8"
+
+
+@dataclass(frozen=True)
+class AudioTrack:
+    """One audio stream of the source. `index` counts audio streams only (0 is the first)."""
+
+    index: int
+    codec: str
+    language: str  # as tagged in the file, usually a 3-letter code ("" when untagged)
+    title: str
+
+
+def probe_audio_tracks(filepath: str) -> List[AudioTrack] | None:
+    """The audio streams of a file, or None when ffprobe could not read it."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "a",
+                "-show_entries", "stream=codec_name:stream_tags=language,title", "-of", "json", filepath,
+            ],
+            capture_output=True, timeout=20, check=False,
+        )
+        if result.returncode != 0:
+            return None
+        streams: List[Dict[str, Any]] = json.loads(result.stdout or b"{}").get("streams", [])
+    except Exception:
+        return None
+    tracks: List[AudioTrack] = []
+    for position, stream in enumerate(streams):
+        tags: Dict[str, Any] = stream.get("tags") or {}
+        language = str(tags.get("language") or "")
+        tracks.append(
+            AudioTrack(position, str(stream.get("codec_name") or ""), "" if language == "und" else language, str(tags.get("title") or ""))
+        )
+    return tracks
 
 
 def bitrate_for_height(height: int) -> int:
@@ -160,9 +195,9 @@ def filter_graph(ladder: Sequence[Rendition], src_height: int, encoder: str) -> 
     return ";".join(parts)
 
 
-def _variant_token(ladder: Sequence[Rendition]) -> str:
-    """ffmpeg fills %v in the init file name only when there is more than one rendition."""
-    return "%v" if len(ladder) > 1 else "0"
+def _variant_token(variant_count: int) -> str:
+    """ffmpeg fills %v in the init file name only when there is more than one variant."""
+    return "%v" if variant_count > 1 else "0"
 
 
 def encode_args(
@@ -190,12 +225,31 @@ def encode_args(
     return args
 
 
-def stream_inf_lines(ladder: Sequence[Rendition], prefix: str, has_audio: bool, subtitles_group: bool) -> List[str]:
+def audio_media_lines(tracks: Sequence[AudioTrack], first_variant: int, prefix: str, describe: "Callable[[AudioTrack], tuple[str, str]]") -> List[str]:
+    """EXT-X-MEDIA lines for the audio tracks. Track k is variant `first_variant + k`.
+
+    `describe` turns a track into (BCP-47 language code, display name).
+    """
+    lines: List[str] = []
+    for track in tracks:
+        code, name = describe(track)
+        language = f'LANGUAGE="{code}",' if code else ""
+        default = "YES" if track.index == 0 else "NO"
+        uri = f"{prefix}_v{first_variant + track.index}.m3u8"
+        lines.append(f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="{name}",{language}DEFAULT={default},AUTOSELECT=YES,URI="{uri}"')
+    return lines
+
+
+def stream_inf_lines(
+    ladder: Sequence[Rendition], prefix: str, has_audio: bool, subtitles_group: bool, audio_group: bool = False
+) -> List[str]:
     """EXT-X-STREAM-INF entries (tag line plus URI line) for every rendition, best first."""
     lines: List[str] = []
     codecs = f"{H264_CODEC_TAG},{AAC_CODEC_TAG}" if has_audio else H264_CODEC_TAG
     for r in ladder:
         tag = f'#EXT-X-STREAM-INF:BANDWIDTH={r.bandwidth},RESOLUTION={r.width}x{r.height},CODECS="{codecs}"'
+        if audio_group:
+            tag += ',AUDIO="aud"'
         if subtitles_group:
             tag += ',SUBTITLES="subs"'
         lines += [tag, f"{prefix}{r.playlist_suffix}"]
@@ -212,12 +266,15 @@ def build_session_args(
     audio_args: Sequence[str] | None,
     start_segment: int,
     init_prefix: str,
+    audio_tracks: Sequence[AudioTrack] = (),
 ) -> List[str]:
     """ffmpeg arguments for a seekable session: read `source` by path from `start_segment`.
 
     Output goes to the working directory as `seg_v{N}_{index:04d}.m4s` with the index and the
     timestamps continuing from the start point, so a restarted encode lands on the same timeline
-    as the one it replaced. `init_prefix` names the init files (`{init_prefix}_v{N}.mp4`); a
+    as the one it replaced. With more than one audio track, each track is written as an audio-only
+    variant after the video ones (so variant `len(ladder) + k` is track k) and the video variants
+    carry no audio; with one, the audio is muxed into every video variant. `init_prefix` names the init files (`{init_prefix}_v{N}.mp4`); a
     restart gives them a new name because their edit lists differ, and the first one is kept.
     """
     start = start_segment * segment_seconds
@@ -229,14 +286,23 @@ def build_session_args(
     args += ["-i", source, "-sn", "-filter_complex", filter_graph(ladder, src_height, encoder)]
     for r in ladder:
         args += ["-map", f"[v{r.index}]"]
+    separate = audio_args is not None and len(audio_tracks) > 1
     if audio_args is not None:
-        for _ in ladder:
-            args += ["-map", "0:a:0"]
+        if separate:
+            for track in audio_tracks:
+                args += ["-map", f"0:a:{track.index}"]
+        else:
+            for _ in ladder:
+                args += ["-map", "0:a:0"]
     args += encode_args(ladder, encoder, preset, segment_seconds, audio_args)
     if start > 0:
         # Timestamps restart at 0 after -ss; shift them back so segment N sits at N * seconds.
         args += ["-output_ts_offset", str(start)]
-    stream_map = " ".join(f"v:{r.index},a:{r.index}" if audio_args is not None else f"v:{r.index}" for r in ladder)
+    if separate:
+        parts = [f"v:{r.index}" for r in ladder] + [f"a:{k}" for k in range(len(audio_tracks))]
+    else:
+        parts = [f"v:{r.index},a:{r.index}" if audio_args is not None else f"v:{r.index}" for r in ladder]
+    stream_map = " ".join(parts)
     args += [
         "-f", "hls",
         "-hls_segment_type", "fmp4",
@@ -244,7 +310,7 @@ def build_session_args(
         "-hls_list_size", "0",
         "-start_number", str(start_segment),
         "-hls_flags", "temp_file",
-        "-hls_fmp4_init_filename", f"{init_prefix}_v{_variant_token(ladder)}.mp4",
+        "-hls_fmp4_init_filename", f"{init_prefix}_v{_variant_token(len(parts))}.mp4",
         "-hls_segment_filename", "seg_v%v_%04d.m4s",
         "-var_stream_map", stream_map,
         "ff_v%v.m3u8",

@@ -79,6 +79,7 @@ class Session:
     has_audio: bool
     audio_is_aac: bool
     encoder: str
+    audio_tracks: List[hls_ladder.AudioTrack] = field(default_factory=list)
     growing: GrowingSource | None = None
     lock: threading.RLock = field(default_factory=threading.RLock)
     proc: "Popen[bytes] | None" = None
@@ -90,6 +91,15 @@ class Session:
     # left over from an earlier playback position cannot pull it back.
     latest: int = 0
     last_request: float = field(default_factory=time.monotonic)
+
+    @property
+    def separate_audio(self) -> bool:
+        """With several audio tracks each is its own variant, after the video ones."""
+        return self.has_audio and len(self.audio_tracks) > 1
+
+    @property
+    def variant_count(self) -> int:
+        return len(self.ladder) + (len(self.audio_tracks) if self.separate_audio else 0)
 
     @property
     def segment_count(self) -> int:
@@ -193,9 +203,12 @@ class SessionManager:
         ladder = hls_ladder.plan_ladder(size[0], size[1], settings.HLS_LADDER_HEIGHTS)
         if not ladder:
             raise SessionError("unreadable")
-        codecs = video_conversion.audio_codecs(source)
-        has_audio = bool(codecs) if codecs is not None else bool(video_conversion.first_audio_format(source))
-        audio_is_aac = "aac" in codecs[0] if codecs else False
+        tracks = hls_ladder.probe_audio_tracks(source)
+        if tracks is None:  # ffprobe could not tell: fall back to MediaInfo for whether there is any audio
+            has_audio = bool(video_conversion.first_audio_format(source))
+            tracks = [hls_ladder.AudioTrack(0, "", "", "")] if has_audio else []
+        has_audio = bool(tracks)
+        audio_is_aac = has_audio and all("aac" in t.codec for t in tracks)
         session_id = uuid.uuid4().hex
         directory = os.path.join(self.root, session_id)
         os.makedirs(directory, exist_ok=True)
@@ -203,6 +216,7 @@ class SessionManager:
             id=session_id, key=key, source=source, directory=directory, duration=duration,
             segment_seconds=settings.HLS_SEGMENT_DURATION, ladder=ladder, src_height=size[1],
             has_audio=has_audio, audio_is_aac=audio_is_aac, encoder=hls_ladder.detect_encoder(settings.HLS_ENCODER),
+            audio_tracks=tracks, growing=growing,
         )
         with self._lock:
             self._sessions[session_id] = session
@@ -303,7 +317,7 @@ class SessionManager:
             source = session.growing.final_path
         args = hls_ladder.build_session_args(
             session.ladder, session.src_height, session.encoder, settings.HLS_X264_PRESET,
-            session.segment_seconds, "pipe:0" if piped else source, self._audio_args(session), index, init_prefix,
+            session.segment_seconds, "pipe:0" if piped else source, self._audio_args(session), index, init_prefix, session.audio_tracks,
         )
         with open(os.path.join(session.directory, "ffmpeg.log"), "a") as stderr_log:
             session.proc = Popen(
@@ -380,7 +394,7 @@ class SessionManager:
     def file_for(self, session: Session, name: str, cancelled: Callable[[], bool] = lambda: False) -> str | None:
         """Path of an init or media segment, waiting for the encoder if it has not got there yet."""
         parsed = parse_segment_request(name)
-        if parsed is None or parsed[1] >= len(session.ladder):
+        if parsed is None or parsed[1] >= session.variant_count:
             return None
         kind, _level, index = parsed
         path = os.path.join(session.directory, name)

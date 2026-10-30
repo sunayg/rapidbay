@@ -19,7 +19,7 @@ import CastButton from "./CastButton.vue";
 import EpisodeMenu from "./EpisodeMenu.vue";
 import TracksMenu from "./TracksMenu.vue";
 import { cleanMediaTitle, formatClock, languageName, type EpisodeChoice } from "./media";
-import { attachHls, playSafely, type HlsHandle, type QualityLevel } from "./useHls";
+import { attachHls, playSafely, type AudioChoice, type HlsHandle, type QualityLevel } from "./useHls";
 import { useEpisodes } from "./useEpisodes";
 import { usePlayerKeys } from "./usePlayerKeys";
 import { useTextTracks } from "./useTextTracks";
@@ -255,6 +255,20 @@ let streamLive = false;
 let positionTimer: ReturnType<typeof setInterval> | undefined;
 let hls: HlsHandle | null = null;
 const qualityLevels = ref<QualityLevel[]>([]);
+// Audio tracks of an HLS stream come from hls.js; the browser's own list only exists in Safari.
+const hlsAudio = ref<AudioChoice[]>([]);
+const hlsAudioActive = ref<number | null>(null);
+const audioChoices = computed(() => (hlsAudio.value.length > 1 ? hlsAudio.value : tracks.audioChoices.value));
+const activeAudio = computed(() => (hlsAudio.value.length > 1 ? hlsAudioActive.value : tracks.activeAudio.value));
+
+function selectAudio(index: number): void {
+  if (hlsAudio.value.length > 1 && hls) {
+    hls.setAudioTrack(index);
+    hlsAudioActive.value = index;
+  } else {
+    tracks.selectAudio(index);
+  }
+}
 const selectedQuality = ref(-1);
 const playingQuality = ref(-1);
 
@@ -327,6 +341,8 @@ async function startSource(): Promise<void> {
         onLive: (live) => (streamLive = live),
         onLevels: (levels) => (qualityLevels.value = levels),
         onLevelSwitch: (index) => (playingQuality.value = index),
+        onAudioTracks: (list) => (hlsAudio.value = list),
+        onAudioSwitch: (index) => (hlsAudioActive.value = index),
       });
     } catch {
       hls = null;
@@ -554,15 +570,15 @@ onBeforeUnmount(() => {
           </button>
           <TracksMenu
             v-if="openMenu === 'tracks'"
-            :audio-choices="tracks.audioChoices.value"
-            :active-audio="tracks.activeAudio.value"
+            :audio-choices="audioChoices"
+            :active-audio="activeAudio"
             :caption-choices="tracks.captionChoices.value"
             :active-caption="tracks.activeCaption.value"
             :quality-levels="qualityLevels"
             :selected-quality="selectedQuality"
             :playing-quality="playingQuality"
             @quality="selectQuality"
-            @audio="tracks.selectAudio"
+            @audio="selectAudio"
             @caption="tracks.selectCaption"
           />
         </div>

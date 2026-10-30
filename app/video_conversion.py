@@ -17,7 +17,7 @@ from iso639 import languages as _iso639_languages
 from pymediainfo import MediaInfo
 
 
-def _resolve_subtitle_language(raw: str) -> Tuple[str, str]:
+def resolve_language(raw: str) -> Tuple[str, str]:
     """Resolve a raw language code (the suffix of a VTT filename) to a
     ``(BCP-47 code, human-readable name)`` pair for HLS ``EXT-X-MEDIA`` tags.
 
@@ -251,7 +251,7 @@ def subtitle_media_lines(output_dir: str, vtt_filenames: List[str], uri_base: st
     for vtt in vtt_filenames:
         vtt_stem = os.path.splitext(vtt)[0]
         raw = vtt_stem.rsplit("_", 1)[-1] if "_" in vtt_stem else ""
-        code, display = _resolve_subtitle_language(raw.replace('"', ""))
+        code, display = resolve_language(raw.replace('"', ""))
         resolved.append((code, display))
     name_totals: Dict[str, int] = {}
     for _code, display in resolved:

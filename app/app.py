@@ -1274,7 +1274,7 @@ def _session_response(session: hls_sessions.Session, name: str, subtitles: bool 
     match = _PLAYLIST_RE.match(name)
     if match:
         level = int(match.group(1))
-        if level >= len(session.ladder):
+        if level >= session.variant_count:
             raise HTTPException(status_code=404)
         return Response(hls_sessions.variant_playlist(session, level), media_type=mpegurl, headers={"Cache-Control": "no-store"})
     path = daemon.sessions.file_for(session, name)

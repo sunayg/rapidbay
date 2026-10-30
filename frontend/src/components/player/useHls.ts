@@ -13,11 +13,18 @@ export interface QualityLevel {
   height: number;
 }
 
+export interface AudioChoice {
+  index: number;
+  label: string;
+}
+
 export interface HlsHandle {
   // Swap the playlist (new subtitles arrived) and keep the position and play state.
   reload(url: string): void;
   // Pick a rendition by index, or -1 to let the player choose from the connection speed.
   setQuality(index: number): void;
+  // Switch to another audio track of the stream, by its index in the playlist.
+  setAudioTrack(index: number): void;
   destroy(): void;
 }
 
@@ -30,6 +37,9 @@ export interface HlsOptions {
   onLevels?: (levels: QualityLevel[]) => void;
   // The rendition currently playing (it changes as the connection does).
   onLevelSwitch?: (index: number) => void;
+  // The audio tracks the stream offers (languages), and the one playing. One track or none: nothing to choose.
+  onAudioTracks?: (tracks: AudioChoice[]) => void;
+  onAudioSwitch?: (index: number) => void;
 }
 
 export function playSafely(video: HTMLVideoElement): void {
@@ -89,6 +99,11 @@ export async function attachHls(video: HTMLVideoElement, url: string, options: H
     const levels = (data.levels || []).map((level, index) => ({ index, height: level.height || 0 }));
     options.onLevels?.(levels.sort((a, b) => b.height - a.height));
   });
+  hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_event, data) => {
+    options.onAudioTracks?.((data.audioTracks || []).map((track, index) => ({ index, label: track.name || track.lang || "Track " + (index + 1) })));
+    options.onAudioSwitch?.(hls.audioTrack);
+  });
+  hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (_event, data) => options.onAudioSwitch?.(data.id));
   hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => options.onLevelSwitch?.(data.level));
   hls.on(Hls.Events.LEVEL_UPDATED, (_event, data) => {
     options.onLive(!!(data && data.details && data.details.live));
@@ -110,6 +125,9 @@ export async function attachHls(video: HTMLVideoElement, url: string, options: H
     },
     setQuality(index: number) {
       if (!dead) hls.currentLevel = index;
+    },
+    setAudioTrack(index: number) {
+      if (!dead) hls.audioTrack = index;
     },
     destroy() {
       if (dead) return;

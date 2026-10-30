@@ -118,3 +118,35 @@ def test_session_args_restart_at_a_segment_on_the_same_timeline():
 
 def build_session_args_for_test(ladder, start):
     return hls_ladder.build_session_args(ladder, 1080, SOFTWARE, "veryfast", 6, "/in.mkv", ["-c:a", "aac"], start, "init")
+
+
+def _tracks():
+    return [hls_ladder.AudioTrack(0, "aac", "eng", ""), hls_ladder.AudioTrack(1, "ac3", "fra", "Version française"), hls_ladder.AudioTrack(2, "aac", "ita", "")]
+
+
+def test_several_audio_tracks_become_separate_variants_after_the_video_ones():
+    ladder = plan_ladder(1920, 1080, [1080, 720])
+    args = hls_ladder.build_session_args(ladder, 1080, SOFTWARE, "veryfast", 6, "/in.mkv", ["-c:a", "aac"], 0, "init", _tracks())
+    maps = [args[i + 1] for i, a in enumerate(args) if a == "-map"]
+    assert maps == ["[v0]", "[v1]", "0:a:0", "0:a:1", "0:a:2"]  # each track once, not once per video rendition
+    assert args[args.index("-var_stream_map") + 1] == "v:0 v:1 a:0 a:1 a:2"
+    assert args[args.index("-hls_fmp4_init_filename") + 1] == "init_v%v.mp4"
+
+
+def test_one_audio_track_stays_muxed_into_every_video_variant():
+    ladder = plan_ladder(1920, 1080, [1080, 720])
+    args = hls_ladder.build_session_args(ladder, 1080, SOFTWARE, "veryfast", 6, "/in.mkv", ["-c:a", "aac"], 0, "init", _tracks()[:1])
+    assert [args[i + 1] for i, a in enumerate(args) if a == "-map"] == ["[v0]", "[v1]", "0:a:0", "0:a:0"]
+    assert args[args.index("-var_stream_map") + 1] == "v:0,a:0 v:1,a:1"
+
+
+def test_audio_tracks_are_listed_in_the_master_playlist_and_tied_to_every_rendition():
+    ladder = plan_ladder(1280, 720, [720, 480])
+    names = {"eng": ("en", "English"), "fra": ("fr", "Version française"), "ita": ("it", "Italian")}
+    lines = hls_ladder.audio_media_lines(_tracks(), len(ladder), "playlist", lambda t: names[t.language])
+    assert lines[0] == '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="English",LANGUAGE="en",DEFAULT=YES,AUTOSELECT=YES,URI="playlist_v2.m3u8"'
+    assert 'NAME="Version française",LANGUAGE="fr",DEFAULT=NO' in lines[1] and lines[1].endswith('URI="playlist_v3.m3u8"')
+    assert lines[2].endswith('URI="playlist_v4.m3u8"')
+    streams = hls_ladder.stream_inf_lines(ladder, "playlist", True, False, audio_group=True)
+    assert all('AUDIO="aud"' in line for line in streams[::2])
+    assert 'AUDIO' not in hls_ladder.stream_inf_lines(ladder, "playlist", True, False)[0]

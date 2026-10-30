@@ -227,3 +227,23 @@ def test_sessions_for_a_torrent_or_file_are_closed_by_prefix(tmp_path):
     assert sorted(manager.keys()) == ["h1/b.mkv", "h2/a.mkv"]
     manager.close_prefix("h1/")
     assert manager.keys() == ["h2/a.mkv"]
+
+
+def test_create_keeps_the_growing_source_and_the_audio_tracks(tmp_path, monkeypatch):
+    source = tmp_path / "movie.mkv"
+    source.write_bytes(b"x")
+    monkeypatch.setattr(hs, "_probe_duration", lambda _p: 60.0)
+    monkeypatch.setattr(hs.hls_ladder, "probe_video_size", lambda _p: (1280, 720))
+    tracks = [hls_ladder.AudioTrack(0, "aac", "eng", ""), hls_ladder.AudioTrack(1, "aac", "fra", "")]
+    monkeypatch.setattr(hs.hls_ladder, "probe_audio_tracks", lambda _p: tracks)
+    monkeypatch.setattr(hs.hls_ladder, "detect_encoder", lambda _p: hls_ladder.SOFTWARE)
+    manager = hs.SessionManager(str(tmp_path / "sessions"))
+    monkeypatch.setattr(manager, "_start_process", lambda s, i: None)
+    monkeypatch.setattr(manager, "_ensure_watcher", lambda: None)
+    growing = hs.GrowingSource(total_size=100, available=lambda: 10)
+
+    session = manager.create("h/f", str(source), 0.0, growing)
+
+    assert session.growing is growing
+    assert session.audio_tracks == tracks and session.separate_audio
+    assert session.variant_count == len(session.ladder) + 2

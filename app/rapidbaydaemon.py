@@ -73,6 +73,15 @@ def _get_output_filepath(magnet_hash: str, filepath: str) -> str:
     )
 
 
+def _describe_audio(track: hls_ladder.AudioTrack) -> Tuple[str, str]:
+    """(BCP-47 language, display name) of an audio track, from its tags."""
+    code, name = video_conversion.resolve_language(track.language)
+    label = track.title or name
+    if label == "Unknown":
+        label = f"Track {track.index + 1}"
+    return code, label.replace('"', "")
+
+
 def _link_or_copy(source: str, destination: str) -> None:
     """Put the downloaded file in the output folder without using a second copy of the disk space.
 
@@ -517,7 +526,13 @@ class RapidBayDaemon:
         vtts = _get_vtt_subtitles(output_dir, os.path.basename(_get_output_filepath(magnet_hash, filename))) if subtitles else []
         lines = ["#EXTM3U", "#EXT-X-VERSION:7"]
         lines += video_conversion.subtitle_media_lines(output_dir, vtts, uri_base=f"/play/{magnet_hash}/")
-        lines += hls_ladder.stream_inf_lines(session.ladder, "playlist", session.has_audio, bool(vtts))
+        if session.separate_audio:
+            lines += hls_ladder.audio_media_lines(
+                session.audio_tracks, len(session.ladder), "playlist", _describe_audio
+            )
+        lines += hls_ladder.stream_inf_lines(
+            session.ladder, "playlist", session.has_audio, bool(vtts), audio_group=session.separate_audio
+        )
         return "\n".join(lines) + "\n"
 
     def _playback_mode(self, output_filepath: str) -> str:
