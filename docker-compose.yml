@@ -10,3 +10,6 @@ services:
         volumes:
             - ./app:/app
             - ./data:/data
+            # Downloads, finished files and torrents live in /tmp (DATA_DIR). One mount for all of it
+            # keeps them across rebuilds, and keeps hard links between them possible.
+            - ./data/tmp:/tmp
