@@ -1,5 +1,6 @@
 import contextlib
 import datetime
+import json
 import math
 import os
 import re
@@ -12,6 +13,7 @@ import urllib.parse
 from subprocess import DEVNULL, PIPE, Popen, TimeoutExpired
 from typing import Any, Callable, Dict, List, Tuple
 
+import hls_ladder
 import log
 import settings
 from common import threaded
@@ -124,6 +126,68 @@ def _cleanup_pre_emitted_vtts(output_dir: str, output_filepath: str) -> None:
 def _incomplete_path(output_filepath: str) -> str:
     output_extension: str = os.path.splitext(output_filepath)[1]
     return f"{output_filepath}{settings.INCOMPLETE_POSTFIX}{output_extension}"
+
+
+def ladder_info_path(m3u8_path: str) -> str:
+    return f"{m3u8_path}.ladder.json"
+
+
+def write_ladder_info(m3u8_path: str, prefix: str, has_audio: bool, ladder: List[hls_ladder.Rendition]) -> None:
+    """Remember which renditions a stream is encoding, so the master playlist can be built later."""
+    info: Dict[str, Any] = {
+        "prefix": prefix,
+        "has_audio": has_audio,
+        "renditions": [
+            {"index": r.index, "width": r.width, "height": r.height, "video_kbps": r.video_kbps} for r in ladder
+        ],
+    }
+    _atomic_write(ladder_info_path(m3u8_path), json.dumps(info))
+
+
+def read_ladder_info(m3u8_path: str) -> Tuple[str, bool, List[hls_ladder.Rendition]] | None:
+    try:
+        with open(ladder_info_path(m3u8_path)) as f:
+            info: Dict[str, Any] = json.load(f)
+        ladder = [
+            hls_ladder.Rendition(int(r["index"]), int(r["width"]), int(r["height"]), int(r["video_kbps"]))
+            for r in info["renditions"]
+        ]
+        return str(info["prefix"]), bool(info["has_audio"]), ladder
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def variant_playlist_paths(m3u8_path: str) -> List[str]:
+    """Per-rendition media playlists of a ladder stream, best first. Empty for a single-rendition stream."""
+    info = read_ladder_info(m3u8_path)
+    if info is None:
+        return []
+    prefix, _, ladder = info
+    directory = os.path.dirname(m3u8_path)
+    return [os.path.join(directory, f"{prefix}{r.playlist_suffix}") for r in ladder]
+
+
+def hls_playlists_ready(m3u8_path: str) -> bool:
+    """True once a player can load the stream: every rendition has written its first segment."""
+    variants = variant_playlist_paths(m3u8_path)
+    if variants:
+        return all(os.path.isfile(v) for v in variants)
+    return os.path.isfile(m3u8_path)
+
+
+def hls_ladder_complete(m3u8_path: str) -> bool:
+    """True when every rendition playlist is finished (ENDLIST), i.e. the whole file has been encoded."""
+    variants = variant_playlist_paths(m3u8_path)
+    if not variants:
+        return False
+    for variant in variants:
+        try:
+            with open(variant) as f:
+                if "#EXT-X-ENDLIST" not in f.read():
+                    return False
+        except OSError:
+            return False
+    return True
 
 
 def _ffprobe_stream_codecs(filepath: str, stream_type: str) -> List[str] | None:
@@ -630,6 +694,38 @@ class VideoConverter:
                 self._notify()
 
 
+    @threaded
+    @log.catch_and_log_exceptions
+    def remux_hls_to_mp4(self, variant_playlist: str, output_filepath: str) -> None:
+        """Publish the top rendition of a finished ladder stream as the MP4 (stream copy, no re-encode)."""
+        if self.file_conversions.get(output_filepath):
+            return
+        self.file_conversions[output_filepath] = True
+        self._notify()
+        try:
+            os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
+            tmp = _incomplete_path(output_filepath)
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-nostdin", "-v", "error", "-y",
+                    "-allowed_extensions", "ALL", "-i", variant_playlist,
+                    "-map", "0", "-c", "copy", "-tag:v", "avc1", "-movflags", "faststart", tmp,
+                ],
+                capture_output=True,
+                timeout=1800,
+                check=False,
+            )
+            if result.returncode != 0:
+                with contextlib.suppress(OSError):
+                    os.remove(tmp)
+                raise Exception(f"HLS remux failed for {variant_playlist}: {result.stderr[-300:]!r}")
+            os.replace(tmp, output_filepath)
+        finally:
+            with contextlib.suppress(KeyError):
+                del self.file_conversions[output_filepath]
+            self._notify()
+
+
 class HLSStreamer:
     def __init__(self) -> None:
         # Maps m3u8 path → live ffmpeg Popen, so streams can be terminated when
@@ -774,50 +870,57 @@ class HLSStreamer:
                 if preamble is None:
                     return  # _await_remux_preamble handled marking/cleanup
 
-            # Detect video codec for proper tagging
-            video_codec = _detect_video_codec(input_filepath)
-            video_tag = "hvc1" if video_codec == "hevc" else "avc1"
-
-            # Copy audio when source is already AAC; otherwise transcode. The
-            # aac_adtstoasc bitstream filter is needed when feeding ADTS-AAC
-            # (typical of .ts) into an fMP4 segment, but is harmless on
-            # transcode output too.
-            audio_codec = _detect_audio_codec(input_filepath)
-            if "aac" in audio_codec:
-                audio_args = ["-c:a", "copy", "-bsf:a", "aac_adtstoasc"]
+            hls_time = str(settings.HLS_SEGMENT_DURATION)
+            audio_codecs = _ffprobe_stream_codecs(input_filepath, "a")
+            has_audio = bool(audio_codecs) if audio_codecs is not None else bool(_detect_audio_codec(input_filepath))
+            audio_is_aac = "aac" in audio_codecs[0] if audio_codecs else "aac" in _detect_audio_codec(input_filepath)
+            size = hls_ladder.probe_video_size(input_filepath)
+            ladder = hls_ladder.plan_ladder(size[0], size[1], settings.HLS_LADDER_HEIGHTS) if size else []
+            ffmpeg_cwd: str | None = None
+            if ladder and size:
+                encoder = hls_ladder.detect_encoder(settings.HLS_ENCODER)
+                prefix = segment_prefix
+                audio_args: List[str] | None = None
+                if has_audio:
+                    audio_args = (
+                        ["-c:a", "copy", "-bsf:a", "aac_adtstoasc"]
+                        if audio_is_aac
+                        else ["-c:a", "aac", "-b:a", settings.AAC_BITRATE, "-ac", str(settings.AAC_CHANNELS), "-bsf:a", "aac_adtstoasc"]
+                    )
+                ffmpeg_cmd = hls_ladder.build_ffmpeg_args(
+                    ladder, size[1], encoder, settings.HLS_X264_PRESET, settings.HLS_SEGMENT_DURATION, prefix, audio_args
+                )
+                ffmpeg_cwd = output_dir
+                write_ladder_info(m3u8_path, prefix, has_audio, ladder)
+                log.debug(f"HLS ladder {[r.height for r in ladder]} via {encoder}: {m3u8_path}")
             else:
-                audio_args = [
-                    "-acodec", "aac",
-                    "-ab", settings.AAC_BITRATE,
-                    "-ac", str(settings.AAC_CHANNELS),
-                    "-bsf:a", "aac_adtstoasc",
+                # Source size unknown: single stream-copy rendition (original behaviour).
+                video_codec = _detect_video_codec(input_filepath)
+                video_tag = "hvc1" if video_codec == "hevc" else "avc1"
+                audio_args_legacy = (
+                    ["-c:a", "copy", "-bsf:a", "aac_adtstoasc"]
+                    if audio_is_aac
+                    else ["-acodec", "aac", "-ab", settings.AAC_BITRATE, "-ac", str(settings.AAC_CHANNELS), "-bsf:a", "aac_adtstoasc"]
+                )
+                ffmpeg_cmd = [
+                    "ffmpeg", "-nostdin",
+                    "-i", "pipe:0",
+                    "-sn",
+                    "-vcodec", "copy",
+                    *audio_args_legacy,
+                    "-tag:v", video_tag,
+                    "-hls_playlist_type", "event",
+                    "-f", "hls",
+                    "-hls_segment_type", "fmp4",
+                    "-hls_time", hls_time,
+                    "-hls_init_time", hls_time,
+                    "-hls_fmp4_init_filename", init_filename,
+                    "-hls_segment_filename", segment_pattern,
+                    m3u8_path,
                 ]
 
-            hls_time = str(settings.HLS_SEGMENT_DURATION)
-            ffmpeg_cmd = [
-                "ffmpeg", "-nostdin",
-                "-i", "pipe:0",
-                # ffmpeg's default per-output-type stream selection auto-maps
-                # the input's subtitle track and emits WebVTT segments next to
-                # the video segments (named "{stem}{N}.vtt"). We surface
-                # subtitles separately via the master playlist, so disable
-                # subtitle output here to keep the segment dir clean.
-                "-sn",
-                "-vcodec", "copy",
-                *audio_args,
-                "-tag:v", video_tag,
-                "-hls_playlist_type", "event",
-                "-f", "hls",
-                "-hls_segment_type", "fmp4",
-                "-hls_time", hls_time,
-                "-hls_init_time", hls_time,
-                "-hls_fmp4_init_filename", init_filename,
-                "-hls_segment_filename", segment_pattern,
-                m3u8_path,
-            ]
-
             with open(stderr_log_path, "w") as stderr_log:
-                proc = Popen(ffmpeg_cmd, stdin=PIPE, stdout=DEVNULL, stderr=stderr_log)
+                proc = Popen(ffmpeg_cmd, stdin=PIPE, stdout=DEVNULL, stderr=stderr_log, cwd=ffmpeg_cwd)
                 # Register the live process and honor any stop request that
                 # arrived before Popen was created (start_stream reserves the
                 # slot synchronously, the Popen itself is created here).
@@ -875,18 +978,23 @@ class HLSStreamer:
                     self.mark_failed(m3u8_path)
                 # Drop the partial m3u8 either way: an event playlist without
                 # ENDLIST will hang players that try to play it later.
+                for playlist in [m3u8_path, *variant_playlist_paths(m3u8_path)]:
+                    with contextlib.suppress(OSError):
+                        os.remove(playlist)
                 with contextlib.suppress(OSError):
-                    os.remove(m3u8_path)
+                    os.remove(ladder_info_path(m3u8_path))
                 return
 
-            # Finalize the m3u8: switch EVENT→VOD and append ENDLIST
-            if os.path.isfile(m3u8_path):
-                with open(m3u8_path) as f:
+            # Finalize the playlists: switch EVENT→VOD and append ENDLIST
+            for playlist in [m3u8_path, *variant_playlist_paths(m3u8_path)]:
+                if not os.path.isfile(playlist):
+                    continue
+                with open(playlist) as f:
                     content = f.read()
                 if "#EXT-X-ENDLIST" not in content:
                     content = content.replace("#EXT-X-PLAYLIST-TYPE:EVENT", "#EXT-X-PLAYLIST-TYPE:VOD")
                     content += "#EXT-X-ENDLIST\n"
-                    with open(m3u8_path, "w") as f:
+                    with open(playlist, "w") as f:
                         f.write(content)
 
             # Stream finished cleanly — drop the now-uninteresting stderr log.
@@ -1193,7 +1301,9 @@ def write_hls_master_playlist(
     # Skip rewrite if the inputs are unchanged since last call. Frontend polls
     # the status endpoint every 1-3s; without this, the master + every subtitle
     # sub-playlist is rewritten on every poll for every viewer.
-    signature: Tuple[str, ...] = (video_m3u8_filename, *vtt_filenames)
+    info = read_ladder_info(os.path.join(output_dir, video_m3u8_filename))
+    variant_sig = tuple(f"{r.index}:{r.height}:{r.video_kbps}" for r in info[2]) if info else ()
+    signature: Tuple[str, ...] = (video_m3u8_filename, *vtt_filenames, *variant_sig)
     with _master_playlist_cache_lock:
         if _master_playlist_cache.get(master_path) == signature and os.path.isfile(master_path):
             return master_filename
@@ -1257,12 +1367,16 @@ def write_hls_master_playlist(
             + f'URI="{sub_playlist_uri}"'
         )
 
-    bandwidth = 2000000
-    if vtt_filenames:
-        lines.append(f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},SUBTITLES="subs"')
+    if info:
+        prefix, has_audio, ladder = info
+        lines += hls_ladder.stream_inf_lines(ladder, prefix, has_audio, bool(vtt_filenames))
     else:
-        lines.append(f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth}")
-    lines.append(urllib.parse.quote(video_m3u8_filename))
+        bandwidth = 2000000
+        if vtt_filenames:
+            lines.append(f'#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},SUBTITLES="subs"')
+        else:
+            lines.append(f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth}")
+        lines.append(urllib.parse.quote(video_m3u8_filename))
 
     _atomic_write(master_path, "\n".join(lines) + "\n")
     with _master_playlist_cache_lock:

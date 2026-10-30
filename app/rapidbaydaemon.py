@@ -383,9 +383,9 @@ class RapidBayDaemon:
 
         # Determine if HLS stream is available for early playback
         hls_info: Dict[str, Any] = {}
-        if is_video and settings.HLS_STREAMING and include_hls:
+        if is_video and include_hls:
             m3u8 = _m3u8_path(magnet_hash, filename)
-            if os.path.isfile(m3u8):
+            if video_conversion.hls_playlists_ready(m3u8):
                 vtt_subtitles = _get_vtt_subtitles(output_dir, filename)
                 # Wrap the media playlist in a master playlist that exposes any
                 # available VTTs as EXT-X-MEDIA:TYPE=SUBTITLES tracks. hls.js
@@ -495,8 +495,6 @@ class RapidBayDaemon:
             unsupported_format, invalid_path, no_torrent, file_not_found,
             not_ready, capacity, codec_failed
         """
-        if not settings.HLS_STREAMING:
-            return {"started": False, "reason": "disabled"}
         # Reject malformed magnet hashes upfront. The hash is interpolated into
         # filesystem paths (output_dir, download_root); restricting to the
         # bittorrent infohash alphabet+lengths makes traversal sequences like
@@ -517,7 +515,7 @@ class RapidBayDaemon:
         # so filename can't traverse — this is the catch-all.
         if not _is_safe_subpath(settings.OUTPUT_DIR, m3u8):
             return {"started": False, "reason": "invalid_path"}
-        if os.path.isfile(m3u8) or m3u8 in self.hls_streamer.active_streams:
+        if video_conversion.hls_playlists_ready(m3u8) or m3u8 in self.hls_streamer.active_streams:
             return {"started": True}  # Already streaming or complete
         if self.hls_streamer.is_failed(m3u8):
             return {"started": False, "reason": "codec_failed"}
@@ -747,6 +745,14 @@ class RapidBayDaemon:
                 embedded_subtitle_languages = [lang for (_, lang) in video_conversion.get_sub_tracks(filepath)]
                 self._download_external_subtitles(filepath, output_dir, skip=available_subtitle_languages + embedded_subtitle_languages)
             elif is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
+                m3u8 = _m3u8_path(magnet_hash, filename)
+                if m3u8 in self.hls_streamer.active_streams:
+                    continue  # a viewer is streaming it: the MP4 is made from that encode, not a second one
+                if video_conversion.hls_ladder_complete(m3u8):
+                    variants = video_conversion.variant_playlist_paths(m3u8)
+                    os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
+                    self.video_converter.remux_hls_to_mp4(variants[0], output_filepath)
+                    continue
                 if not os.path.isfile(filepath):
                     log.debug(f"File not found for conversion, skipping: {filepath}")
                     continue

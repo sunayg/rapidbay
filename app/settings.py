@@ -73,7 +73,9 @@ TMDB_API_KEY: str | None = None
 # rushed ahead of the feeder (HLS_PREFETCH_BYTES). Torrent-wide
 # sequential_download is deliberately NOT used — unwatched downloads keep
 # rarest-first piece picking.
-HLS_STREAMING: bool = False
+HLS_LADDER_HEIGHTS: List[int] = [1080, 720, 480, 360]  # quality levels to encode, never above the source
+HLS_ENCODER: str = "auto"  # auto, software or vaapi
+HLS_X264_PRESET: str = "veryfast"  # software encoder speed/quality trade-off
 HLS_SEGMENT_DURATION: int = 6  # seconds per HLS segment
 HLS_START_THRESHOLD: int = 50 * 1024 * 1024  # bytes of sequential data before starting HLS
 MAX_PARALLEL_HLS_STREAMS: int = 2  # cap on concurrent HLS ffmpeg processes (independent of MAX_PARALLEL_CONVERSIONS)

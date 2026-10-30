@@ -7,7 +7,7 @@ EXPECTED = {
     "MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS",
     "TORRENT_LISTENING_PORT", "DHT_ROUTERS", "MAX_TORRENT_AGE_HOURS", "TORRENT_DOWNLOAD_LIMIT",
     "TORRENT_UPLOAD_LIMIT", "SUPPORTED_EXTENSIONS", "MAX_OUTPUT_FILE_AGE",
-    "HLS_STREAMING", "HLS_SEGMENT_DURATION", "HLS_START_THRESHOLD", "MAX_PARALLEL_HLS_STREAMS",
+    "HLS_LADDER_HEIGHTS", "HLS_SEGMENT_DURATION", "HLS_START_THRESHOLD", "MAX_PARALLEL_HLS_STREAMS",
     "HLS_STALL_TIMEOUT", "HLS_VIEWER_TIMEOUT", "HLS_PREFETCH_BYTES",
     "CONVERT_VIDEO", "VIDEO_CONVERSION_PARAMS", "AAC_BITRATE", "AAC_CHANNELS",
     "MAX_PARALLEL_CONVERSIONS", "VIDEO_EXTENSIONS",
@@ -103,7 +103,7 @@ def test_ints_and_ranges():
     assert coerce(ch, 8) == 8
     with pytest.raises(ValidationError):
         coerce(ch, 9)
-    flag = FIELDS["HLS_STREAMING"]
+    flag = FIELDS["CONVERT_VIDEO"]
     assert coerce(flag, True) is True
     for bad in ("yes", 1):
         with pytest.raises(ValidationError):
@@ -119,3 +119,12 @@ def test_errors_never_contain_secret():
     assert coerce(f, "p4ss-w0rd_!") == "p4ss-w0rd_!"
     with pytest.raises(ValidationError):
         coerce(f, "pässword")
+
+
+def test_ladder_heights_are_validated():
+    f = FIELDS["HLS_LADDER_HEIGHTS"]
+    assert coerce(f, ["1080", "720", "480"]) == [1080, 720, 480]
+    for bad in ([], ["50"], ["9000"], ["tall"]):
+        with pytest.raises(ValidationError):
+            coerce(f, bad)
+    assert to_wire(f, [1080, 720]) == ["1080", "720"]

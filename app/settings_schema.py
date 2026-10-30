@@ -38,6 +38,7 @@ class Field:
     nullable: bool = False
     min: int | None = None
     max: int | None = None
+    non_empty: bool = False
 
 
 CATEGORIES: list[tuple[str, str]] = [
@@ -69,7 +70,7 @@ FIELDS: dict[str, Field] = dict(
         _f("TORRENT_UPLOAD_LIMIT", "torrents", "int", "Upload limit (bytes/s, -1 = none)", help="Applies to torrents added after the change.", min=-1),
         _f("SUPPORTED_EXTENSIONS", "torrents", "str_list", "Supported extensions", help="One per line."),
         _f("MAX_OUTPUT_FILE_AGE", "torrents", "int", "Max output file age (hours)", min=1),
-        _f("HLS_STREAMING", "streaming", "bool", "HLS streaming while downloading"),
+        _f("HLS_LADDER_HEIGHTS", "streaming", "int_list", "Quality levels (heights)", help="One height per line, highest first, for example 1080. The player switches between them as the connection allows. Never above the source.", min=144, max=4320, non_empty=True),
         _f("HLS_SEGMENT_DURATION", "streaming", "int", "Segment duration (seconds)", min=1),
         _f("HLS_START_THRESHOLD", "streaming", "int", "Start threshold (bytes)", min=1),
         _f("MAX_PARALLEL_HLS_STREAMS", "streaming", "int", "Max parallel HLS streams", min=1),
@@ -181,6 +182,13 @@ def coerce(field: Field, wire: Any) -> Any:
             if not re.fullmatch(r"-?\d+", item):
                 raise ValidationError(f"{field.label}: '{item}' is not a whole number")
             out.append(int(item))
+        for number in out:
+            if field.min is not None and number < field.min:
+                raise ValidationError(f"{field.label}: {number} is below {field.min}")
+            if field.max is not None and number > field.max:
+                raise ValidationError(f"{field.label}: {number} is above {field.max}")
+        if field.non_empty and not out:
+            raise ValidationError(f"{field.label}: at least one entry is required")
         return out
     if kind == "host_port_list":
         routers: list[tuple[str, int]] = []
