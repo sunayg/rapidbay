@@ -44,6 +44,8 @@ RUN apt-get update && \
     nginx \
     ffmpeg \
     mediainfo \
+    vainfo \
+    intel-media-va-driver \
     ca-certificates \
     python3 \
     python3-venv \

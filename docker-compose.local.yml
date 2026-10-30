@@ -36,6 +36,8 @@ services:
             HLS_STREAMING: ${HLS_STREAMING:-False}
             PROWLARR_HOST: http://localhost:9696
             PROWLARR_API_KEY: ${PROWLARR_API_KEY}
+        devices:
+            - /dev/dri:/dev/dri # Intel/AMD GPU for hardware video encoding (VAAPI)
         volumes:
             - ./app:/app
             - ./data:/data
