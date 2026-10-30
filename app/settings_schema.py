@@ -10,11 +10,9 @@ from typing import Any, Literal, cast
 from urllib.parse import urlparse
 
 Kind = Literal[
-    "bool", "int", "str", "url", "bitrate", "str_list", "int_list", "host_port_list", "regex_list", "codec_preset"
+    "bool", "int", "str", "url", "bitrate", "str_list", "int_list", "host_port_list", "regex_list"
 ]
 
-CODECS = ("libx264", "libx265", "copy")
-PRESETS = ("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow")
 
 MAX_LIST_ITEMS = 50
 MAX_ITEM_LENGTH = 200
@@ -45,7 +43,7 @@ CATEGORIES: list[tuple[str, str]] = [
     ("search", "Search"),
     ("torrents", "Torrents"),
     ("streaming", "Streaming"),
-    ("conversion", "Conversion"),
+    ("conversion", "Encoding"),
     ("subtitles", "Subtitles and metadata"),
     ("trending", "Trending"),
     ("general", "General"),
@@ -74,14 +72,9 @@ FIELDS: dict[str, Field] = dict(
         _f("HLS_SEGMENT_DURATION", "streaming", "int", "Segment duration (seconds)", min=1),
         _f("HLS_START_THRESHOLD", "streaming", "int", "Start threshold (bytes)", min=1),
         _f("MAX_PARALLEL_HLS_STREAMS", "streaming", "int", "Max parallel HLS streams", min=1),
-        _f("HLS_STALL_TIMEOUT", "streaming", "int", "Stall timeout (seconds)", min=1),
-        _f("HLS_VIEWER_TIMEOUT", "streaming", "int", "Viewer timeout (seconds)", min=1),
         _f("HLS_PREFETCH_BYTES", "streaming", "int", "Prefetch window (bytes)", min=1),
-        _f("CONVERT_VIDEO", "conversion", "bool", "Convert video"),
-        _f("VIDEO_CONVERSION_PARAMS", "conversion", "codec_preset", "Video codec and preset"),
         _f("AAC_BITRATE", "conversion", "bitrate", "AAC bitrate", help="For example 256k."),
         _f("AAC_CHANNELS", "conversion", "int", "AAC channels", min=1, max=8),
-        _f("MAX_PARALLEL_CONVERSIONS", "conversion", "int", "Max parallel conversions", min=1),
         _f("VIDEO_EXTENSIONS", "conversion", "str_list", "Video extensions", help="One per line."),
         _f("SUBTITLE_LANGUAGES", "subtitles", "str_list", "Subtitle languages", help="One per line, for example en."),
         _f("OPENSUBTITLES_USERNAME", "subtitles", "str", "OpenSubtitles username"),
@@ -133,16 +126,6 @@ def _int(field: Field, wire: Any) -> int | None:
     return wire
 
 
-def build_conversion_params(codec: str, preset: str | None) -> str:
-    if codec not in CODECS:
-        raise ValidationError(f"Codec must be one of: {', '.join(CODECS)}")
-    if codec == "copy":
-        return "copy"
-    if preset not in PRESETS:
-        raise ValidationError(f"Preset must be one of: {', '.join(PRESETS)}")
-    return f"{codec} -preset {preset}"
-
-
 def coerce(field: Field, wire: Any) -> Any:
     kind = field.kind
     if kind == "bool":
@@ -169,10 +152,6 @@ def coerce(field: Field, wire: Any) -> Any:
         if kind == "bitrate" and not _BITRATE_RE.match(value):
             raise ValidationError(f"{field.label}: use digits with an optional k, for example 256k")
         return value
-    if kind == "codec_preset":
-        if not isinstance(wire, dict):
-            raise ValidationError(f"{field.label}: choose a codec and preset")
-        return build_conversion_params(str(wire.get("codec")), wire.get("preset"))
     items = _clean_list(field, wire)
     if kind == "str_list":
         return items
@@ -214,11 +193,4 @@ def to_wire(field: Field, value: Any) -> Any:
         return [str(v) for v in value]
     if kind == "str_list" or kind == "regex_list":
         return list(value)
-    if kind == "codec_preset":
-        parts = str(value).split()
-        if parts == ["copy"]:
-            return {"codec": "copy", "preset": None}
-        if len(parts) == 3 and parts[1] == "-preset" and parts[0] in CODECS and parts[2] in PRESETS:
-            return {"codec": parts[0], "preset": parts[2]}
-        return None
     return value

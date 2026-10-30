@@ -340,140 +340,127 @@ describe("download screen", () => {
     expect(wrapper.find(".cancel-download").exists()).toBe(true);
   });
 
-  it("shows play only when can_stream, posts the stream request and hides the button", async () => {
-    handlers[`/api/magnet/${HASH}/Show.S01E01.mkv/stream`] = () => ({ started: true });
-    const { wrapper } = await download();
-    const source = FakeEventSource.last("/api/magnet_events/");
-    source.emit(info());
-    await flushPromises();
-    expect(wrapper.find(".stream-btn").exists()).toBe(false);
-    source.emit(info({ can_stream: true }));
-    await flushPromises();
-    await wrapper.find(".stream-btn").trigger("click");
-    await flushPromises();
-    expect(posts(`/api/magnet/${HASH}/Show.S01E01.mkv/stream`)).toHaveLength(1);
-    expect(wrapper.find(".stream-btn").exists()).toBe(false);
-    // Reaped stream: backend reports can_stream again, the button returns.
-    source.emit(info({ can_stream: true }));
-    await flushPromises();
-    expect(wrapper.find(".stream-btn").exists()).toBe(true);
-  });
+  const SESSION = `/api/magnet/${HASH}/Show.S01E01.mkv/session`;
+  const readySession = { status: "ready", filename: "Show.S01E01.mkv", supported: true, playback: "session" as const };
 
-  it("explains a declined stream and re-shows the play button", async () => {
-    handlers[`/api/magnet/${HASH}/Show.S01E01.mkv/stream`] = () => ({ started: false, reason: "capacity" });
-    const { wrapper } = await download();
-    FakeEventSource.last("/api/magnet_events/").emit(info({ can_stream: true }));
-    await flushPromises();
-    await wrapper.find(".stream-btn").trigger("click");
-    await flushPromises();
-    expect(wrapper.find(".stream-message").text()).toContain("streaming capacity");
-    expect(wrapper.find(".stream-btn").exists()).toBe(true);
-  });
-
-  it("shows 'Starting stream' while the playlist is pending", async () => {
-    const { wrapper } = await download();
-    const source = FakeEventSource.last("/api/magnet_events/");
-    source.emit(info({ hls_pending: true }));
-    await flushPromises();
-    expect(wrapper.find(".stream-message").text()).toBe("Starting stream…");
-    source.emit(info());
-    await flushPromises();
-    expect(wrapper.find(".stream-message").exists()).toBe(false);
-  });
-
-  it("plays the HLS link while downloading and keeps it, in the same player, once the file is ready", async () => {
-    const { wrapper } = await download();
-    const source = FakeEventSource.last("/api/magnet_events/");
-    source.emit(info({ hls_filename: "hls/master.m3u8", hls_subtitles: ["a_eng.vtt"], subtitles: ["a_eng.vtt"] }));
-    await flushPromises();
-    const host = wrapper.findComponent({ name: "PlayerHost" });
-    expect(host.exists()).toBe(true);
-    expect(host.props("url")).toBe(`/play/${HASH}/hls%2Fmaster.m3u8?subs=1`);
-    expect(host.props("supported")).toBe(true);
-    expect(host.props("subtitles")).toEqual([]);
-    expect(host.props("downloadStatus")).toBe("downloading");
-    expect(host.props("downloadProgress")).toBe(0.25);
-    // More subtitles arrive: same player instance (same key), new source URL.
-    source.emit(info({ hls_filename: "hls/master.m3u8", hls_subtitles: ["a_eng.vtt", "a_nld.vtt"] }));
-    await flushPromises();
-    const same = wrapper.findComponent({ name: "PlayerHost" });
-    expect(same.element).toBe(host.element);
-    expect(same.props("url")).toContain("?subs=2");
-    // Done: the MP4 exists, but the viewer stays on the adaptive stream (no handover).
-    source.emit(info({ status: "ready", progress: 1, filename: "Show.S01E01.mp4", supported: true, subtitles: ["Show_eng.vtt"], hls_filename: "hls/master.m3u8", hls_subtitles: ["a_eng.vtt", "a_nld.vtt"] }));
-    await flushPromises();
-    const still = wrapper.findComponent({ name: "PlayerHost" });
-    expect(still.element).toBe(host.element);
-    expect(still.props("url")).toContain("hls%2Fmaster.m3u8");
-    expect(still.props("subtitles")).toEqual([]);
-    expect(still.props("downloadProgress")).toBeNull();
-  });
-
-  it("goes straight to the MP4 player when ready", async () => {
-    const { wrapper } = await download();
-    FakeEventSource.last("/api/magnet_events/").emit(info({ status: "ready", filename: "x y.mp4", supported: false }));
-    await flushPromises();
-    const host = wrapper.findComponent({ name: "PlayerHost" });
-    expect(host.props("url")).toBe(`/play/${HASH}/x%20y.mp4`);
-    expect(host.props("supported")).toBe(false);
-  });
-
-  it("opens an encode session for a finished file the browser cannot play directly, resuming where it left off", async () => {
+  it("opens an encode session as soon as a downloading file can stream, resuming where it left off", async () => {
     localStorage.setItem(libraryModule.getVideoPositionKey(MAGNET, "Show.S01E01.mkv"), JSON.stringify({ position: 612.8, duration: 3000, ts: Date.now() }));
-    handlers[`/api/magnet/${HASH}/Show.S01E01.mkv/session`] = () => ({ url: "/api/hls/abc123/master.m3u8" });
+    handlers[SESSION] = () => ({ url: "/api/hls/abc123/master.m3u8" });
     const { wrapper } = await download();
-    FakeEventSource.last("/api/magnet_events/").emit(info({ status: "ready", filename: "Show.S01E01.mkv", supported: true, playback: "session" }));
+    const source = FakeEventSource.last("/api/magnet_events/");
+    source.emit(info());
     await flushPromises();
-    const call = posts(`/api/magnet/${HASH}/Show.S01E01.mkv/session`);
+    expect(posts(SESSION)).toHaveLength(0); // not enough of the file yet
+    expect(wrapper.find(".stream-btn").exists()).toBe(false); // there is no play button to press
+    source.emit(info({ can_stream: true }));
+    await flushPromises();
+    const call = posts(SESSION);
     expect(call).toHaveLength(1);
     expect(call[0].url).toContain("?start=612");
     const host = wrapper.findComponent({ name: "PlayerHost" });
     expect(host.props("url")).toBe("/api/hls/abc123/master.m3u8");
     expect(host.props("supported")).toBe(true);
-    // A later status push does not open a second session or swap the link.
-    FakeEventSource.last("/api/magnet_events/").emit(info({ status: "ready", filename: "Show.S01E01.mkv", supported: true, playback: "session" }));
-    await flushPromises();
-    expect(posts(`/api/magnet/${HASH}/Show.S01E01.mkv/session`)).toHaveLength(1);
+    expect(host.props("subtitles")).toEqual([]);
+    expect(host.props("downloadStatus")).toBe("downloading");
+    expect(host.props("downloadProgress")).toBe(0.25);
   });
 
-  it("says so when the server has no room for another encode session", async () => {
-    handlers[`/api/magnet/${HASH}/Show.S01E01.mkv/session`] = () => ({ url: null, reason: "capacity" });
+  it("keeps the same session and player when the download finishes", async () => {
+    handlers[SESSION] = () => ({ url: "/api/hls/abc123/master.m3u8" });
     const { wrapper } = await download();
-    FakeEventSource.last("/api/magnet_events/").emit(info({ status: "ready", filename: "Show.S01E01.mkv", supported: true, playback: "session" }));
+    const source = FakeEventSource.last("/api/magnet_events/");
+    source.emit(info({ can_stream: true }));
+    await flushPromises();
+    const host = wrapper.findComponent({ name: "PlayerHost" });
+    source.emit(info({ ...readySession, progress: 1, subtitles: ["Show_eng.vtt"] }));
+    await flushPromises();
+    const still = wrapper.findComponent({ name: "PlayerHost" });
+    expect(still.element).toBe(host.element);
+    expect(still.props("url")).toBe("/api/hls/abc123/master.m3u8");
+    expect(still.props("downloadProgress")).toBeNull();
+    expect(posts(SESSION)).toHaveLength(1); // no second session
+  });
+
+  it("explains a refusal while downloading, without an error, and tries again later", async () => {
+    vi.useFakeTimers();
+    let answers = [{ url: null, reason: "capacity" }, { url: "/api/hls/abc123/master.m3u8" }];
+    handlers[SESSION] = () => answers.shift();
+    const { wrapper } = await download();
+    const source = FakeEventSource.last("/api/magnet_events/");
+    source.emit(info({ can_stream: true }));
+    await flushPromises();
+    expect(wrapper.find(".stream-message").text()).toContain("capacity");
+    expect(wrapper.find(".dl-error").exists()).toBe(false);
+    await vi.advanceTimersByTimeAsync(5100);
+    source.emit(info({ can_stream: true }));
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "PlayerHost" }).props("url")).toBe("/api/hls/abc123/master.m3u8");
+    vi.useRealTimers();
+  });
+
+  it("does not keep asking for a file that can never stream while it downloads", async () => {
+    vi.useFakeTimers();
+    handlers[SESSION] = () => ({ url: null, reason: "unsupported_format" });
+    const { wrapper } = await download();
+    const source = FakeEventSource.last("/api/magnet_events/");
+    source.emit(info({ can_stream: true }));
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(20000);
+    source.emit(info({ can_stream: true }));
+    await flushPromises();
+    expect(posts(SESSION)).toHaveLength(1);
+    expect(wrapper.find(".stream-message").text()).toContain("once it has finished");
+    vi.useRealTimers();
+  });
+
+  it("opens a session for a finished file the browser cannot play directly", async () => {
+    handlers[SESSION] = () => ({ url: "/api/hls/abc123/master.m3u8" });
+    const { wrapper } = await download();
+    FakeEventSource.last("/api/magnet_events/").emit(info(readySession));
+    await flushPromises();
+    expect(posts(SESSION)).toHaveLength(1);
+    expect(wrapper.findComponent({ name: "PlayerHost" }).props("url")).toBe("/api/hls/abc123/master.m3u8");
+  });
+
+  it("shows an error with retry when a finished file has no room for a session", async () => {
+    handlers[SESSION] = () => ({ url: null, reason: "capacity" });
+    const { wrapper } = await download();
+    FakeEventSource.last("/api/magnet_events/").emit(info(readySession));
     await flushPromises();
     expect(wrapper.findComponent({ name: "PlayerHost" }).exists()).toBe(false);
-    expect(text(wrapper)).toContain("Too many videos are playing");
+    expect(wrapper.find(".dl-error").text()).toContain("capacity");
   });
 
   it("plays a browser-friendly MP4 directly, with no session", async () => {
     const { wrapper } = await download();
-    FakeEventSource.last("/api/magnet_events/").emit(info({ status: "ready", filename: "x.mp4", supported: true, playback: "direct" }));
+    FakeEventSource.last("/api/magnet_events/").emit(info({ status: "ready", filename: "x y.mp4", supported: true, playback: "direct" }));
     await flushPromises();
-    expect(wrapper.findComponent({ name: "PlayerHost" }).props("url")).toBe(`/play/${HASH}/x.mp4`);
+    expect(wrapper.findComponent({ name: "PlayerHost" }).props("url")).toBe(`/play/${HASH}/x%20y.mp4`);
     expect(posts("/api/magnet/")).toHaveLength(0);
   });
 
-  it("falls back to the progress view when HLS playback fails, and does not retry HLS", async () => {
+  it("falls back to the progress view when playback fails, and does not retry the session", async () => {
+    handlers[SESSION] = () => ({ url: "/api/hls/abc123/master.m3u8" });
     const { wrapper } = await download();
     const source = FakeEventSource.last("/api/magnet_events/");
-    source.emit(info({ hls_filename: "hls/master.m3u8", can_stream: true }));
+    source.emit(info({ can_stream: true }));
     await flushPromises();
     wrapper.findComponent({ name: "PlayerHost" }).vm.$emit("stream-error");
     await flushPromises();
     expect(wrapper.findComponent({ name: "PlayerHost" }).exists()).toBe(false);
-    expect(wrapper.find(".stream-btn").exists()).toBe(false);
-    source.emit(info({ hls_filename: "hls/master.m3u8", can_stream: true }));
+    source.emit(info({ can_stream: true }));
     await flushPromises();
     expect(wrapper.findComponent({ name: "PlayerHost" }).exists()).toBe(false);
-    // the MP4 is still welcome
-    source.emit(info({ status: "ready", filename: "a.mp4", supported: true }));
+    expect(posts(SESSION)).toHaveLength(1);
+    // a directly playable MP4 is still welcome
+    source.emit(info({ status: "ready", filename: "a.mp4", supported: true, playback: "direct" }));
     await flushPromises();
     expect(wrapper.findComponent({ name: "PlayerHost" }).exists()).toBe(true);
   });
 
   it("back from the player returns to the file list", async () => {
     const { router, wrapper } = await download();
-    FakeEventSource.last("/api/magnet_events/").emit(info({ status: "ready", filename: "a.mp4", supported: true }));
+    FakeEventSource.last("/api/magnet_events/").emit(info({ status: "ready", filename: "a.mp4", supported: true, playback: "direct" }));
     await flushPromises();
     wrapper.findComponent({ name: "PlayerHost" }).vm.$emit("back");
     await flushPromises();
@@ -483,7 +470,7 @@ describe("download screen", () => {
   it("falls back to polling until ready when the event stream fails", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let calls = 0;
-    handlers[`/api/magnet/${HASH}/Show.S01E01.mkv`] = () => (++calls < 3 ? info({ progress: calls / 10 }) : info({ status: "ready", filename: "a.mp4", supported: true }));
+    handlers[`/api/magnet/${HASH}/Show.S01E01.mkv`] = () => (++calls < 3 ? info({ progress: calls / 10 }) : info({ status: "ready", filename: "a.mp4", supported: true, playback: "direct" }));
     const { wrapper } = await download();
     FakeEventSource.last("/api/magnet_events/").fail();
     await flushPromises();

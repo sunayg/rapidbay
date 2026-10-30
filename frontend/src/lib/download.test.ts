@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canCancelStatus, headingFor, hlsLink, isAppleBrowser, mp4Link, playLinkIdentity, streamDeclinedMessage, subheadingFor, subtitleTracks } from "./download";
+import { canCancelStatus, headingFor, isAppleBrowser, mp4Link, playLinkIdentity, streamDeclinedMessage, subheadingFor, subtitleTracks } from "./download";
 
 describe("download helpers", () => {
   it("only the torrent phase can be cancelled", () => {
@@ -17,7 +17,6 @@ describe("download helpers", () => {
   });
   it("builds play links, with the HLS link carrying the subtitle count", () => {
     expect(mp4Link("abc", "a b.mp4")).toBe("/play/abc/a%20b.mp4");
-    expect(hlsLink("abc", "hls/master.m3u8", 2)).toBe("/play/abc/hls%2Fmaster.m3u8?subs=2");
     expect(playLinkIdentity("/play/abc/x.m3u8?subs=3")).toBe("/play/abc/x.m3u8");
   });
   it("derives subtitle language and url", () => {
@@ -25,8 +24,8 @@ describe("download helpers", () => {
   });
   it("explains why a stream was declined", () => {
     expect(streamDeclinedMessage("capacity")).toContain("capacity");
-    expect(streamDeclinedMessage("weird")).toBe("Couldn't start the stream.");
-    expect(streamDeclinedMessage(undefined)).toBe("Couldn't start the stream.");
+    expect(streamDeclinedMessage("weird")).toBe("Couldn't start playback.");
+    expect(streamDeclinedMessage(undefined)).toBe("Couldn't start playback.");
   });
   it("detects Apple browsers by vendor", () => {
     expect(isAppleBrowser("Apple Computer, Inc.")).toBe(true);

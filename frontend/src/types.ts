@@ -7,13 +7,7 @@ export type Kind =
   | "str_list"
   | "int_list"
   | "host_port_list"
-  | "regex_list"
-  | "codec_preset";
-
-export interface CodecPreset {
-  codec: string;
-  preset: string | null;
-}
+  | "regex_list";
 
 export interface FieldInfo {
   key: string;

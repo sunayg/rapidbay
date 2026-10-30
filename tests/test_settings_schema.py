@@ -8,9 +8,8 @@ EXPECTED = {
     "TORRENT_LISTENING_PORT", "DHT_ROUTERS", "MAX_TORRENT_AGE_HOURS", "TORRENT_DOWNLOAD_LIMIT",
     "TORRENT_UPLOAD_LIMIT", "SUPPORTED_EXTENSIONS", "MAX_OUTPUT_FILE_AGE",
     "HLS_LADDER_HEIGHTS", "HLS_SEGMENT_DURATION", "HLS_START_THRESHOLD", "MAX_PARALLEL_HLS_STREAMS",
-    "HLS_STALL_TIMEOUT", "HLS_VIEWER_TIMEOUT", "HLS_PREFETCH_BYTES",
-    "CONVERT_VIDEO", "VIDEO_CONVERSION_PARAMS", "AAC_BITRATE", "AAC_CHANNELS",
-    "MAX_PARALLEL_CONVERSIONS", "VIDEO_EXTENSIONS",
+    "HLS_PREFETCH_BYTES",
+    "AAC_BITRATE", "AAC_CHANNELS", "VIDEO_EXTENSIONS",
     "SUBTITLE_LANGUAGES", "OPENSUBTITLES_USERNAME", "OPENSUBTITLES_PASSWORD", "TMDB_API_KEY",
     "EXCLUDE_TRACKERS_FROM_TRENDING", "EXCLUDE_CATEGORIES_FROM_TRENDING", "TRENDING_TITLE_BLOCKLIST",
     "TRENDING_BLOCK_NON_LATIN_TITLES",
@@ -20,7 +19,7 @@ EXPECTED = {
 
 def test_every_editable_setting_has_a_field():
     assert set(FIELDS) == EXPECTED
-    assert len(FIELDS) == 35
+    assert len(FIELDS) == 30
     for key in FIELDS:
         assert hasattr(settings, key)
     assert {k for k, f in FIELDS.items() if f.restart_needed} == {"TORRENT_LISTENING_PORT", "DHT_ROUTERS"}
@@ -45,25 +44,6 @@ def test_aac_bitrate():
     for bad in ("256k; rm", "-1k", "k"):
         with pytest.raises(ValidationError):
             coerce(f, bad)
-
-
-def test_conversion_params_built_server_side():
-    f = FIELDS["VIDEO_CONVERSION_PARAMS"]
-    assert coerce(f, {"codec": "libx264", "preset": "ultrafast"}) == "libx264 -preset ultrafast"
-    assert coerce(f, {"codec": "copy"}) == "copy"
-    for bad in (
-        {"codec": "libx264; evil", "preset": "ultrafast"},
-        {"codec": "libx264", "preset": "-i /etc/passwd"},
-        "libx264 -i /etc/passwd",
-    ):
-        with pytest.raises(ValidationError):
-            coerce(f, bad)
-
-
-def test_to_wire_conversion_custom_env_value_is_none():
-    f = FIELDS["VIDEO_CONVERSION_PARAMS"]
-    assert to_wire(f, "libx264 -crf 18") is None
-    assert to_wire(f, "libx264 -preset ultrafast") == {"codec": "libx264", "preset": "ultrafast"}
 
 
 def test_lists_are_cleaned():
@@ -103,7 +83,7 @@ def test_ints_and_ranges():
     assert coerce(ch, 8) == 8
     with pytest.raises(ValidationError):
         coerce(ch, 9)
-    flag = FIELDS["CONVERT_VIDEO"]
+    flag = FIELDS["TRENDING_BLOCK_NON_LATIN_TITLES"]
     assert coerce(flag, True) is True
     for bad in ("yes", 1):
         with pytest.raises(ValidationError):

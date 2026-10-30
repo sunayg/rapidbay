@@ -1,12 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { CodecPreset, FieldInfo } from "../types";
+import type { FieldInfo } from "../types";
 
 const props = defineProps<{ field: FieldInfo; modelValue: unknown; error?: string }>();
 const emit = defineEmits<{ "update:modelValue": [value: unknown]; reset: []; clear: [] }>();
-
-const CODECS = ["libx264", "libx265", "copy"];
-const PRESETS = ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow"];
 
 const isList = computed(() => ["str_list", "int_list", "host_port_list", "regex_list"].includes(props.field.kind));
 const canClear = computed(() => props.field.secret || props.field.nullable || ["str", "url"].includes(props.field.kind));
@@ -42,17 +39,6 @@ function onNumber(event: Event) {
   emit("update:modelValue", raw === "" ? null : Number(raw));
 }
 
-const codec = computed(() => (props.modelValue as CodecPreset | null) ?? null);
-
-function setCodec(event: Event) {
-  const next = (event.target as HTMLSelectElement).value;
-  emit("update:modelValue", { codec: next, preset: next === "copy" ? null : (codec.value?.preset ?? "ultrafast") });
-}
-
-function setPreset(event: Event) {
-  emit("update:modelValue", { codec: codec.value?.codec ?? "libx264", preset: (event.target as HTMLSelectElement).value });
-}
-
 const id = computed(() => `field-${props.field.key}`);
 </script>
 
@@ -69,16 +55,6 @@ const id = computed(() => `field-${props.field.key}`);
     <input v-if="field.kind === 'bool'" :id="id" type="checkbox" :checked="modelValue === true" @change="emit('update:modelValue', ($event.target as HTMLInputElement).checked)" />
     <input v-else-if="field.kind === 'int'" :id="id" type="number" :min="field.min ?? undefined" :max="field.max ?? undefined" :value="modelValue ?? ''" @input="onNumber" />
     <textarea v-else-if="isList" :id="id" rows="4" :value="text" @input="onText"></textarea>
-    <div v-else-if="field.kind === 'codec_preset'" class="codec">
-      <select :id="id" :value="codec?.codec ?? ''" @change="setCodec">
-        <option v-if="!codec" value="" disabled>custom value from environment</option>
-        <option v-for="c in CODECS" :key="c" :value="c">{{ c }}</option>
-      </select>
-      <select v-if="codec && codec.codec !== 'copy'" aria-label="Preset" :value="codec.preset ?? 'ultrafast'" @change="setPreset">
-        <option v-for="p in PRESETS" :key="p" :value="p">{{ p }}</option>
-      </select>
-      <span v-if="!codec" class="hint">Using a custom value from the environment. Choose a codec to replace it.</span>
-    </div>
     <input
       v-else
       :id="id"

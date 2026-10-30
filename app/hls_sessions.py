@@ -18,7 +18,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from subprocess import DEVNULL, Popen
+from subprocess import DEVNULL, PIPE, Popen
 from typing import Callable, Dict, List
 
 import hls_ladder
@@ -38,9 +38,26 @@ IDLE_SECONDS = 180
 # How long a request waits for an encode to produce its segment.
 SEGMENT_WAIT_SECONDS = 45
 POLL_SECONDS = 0.1
+PIPE_CHUNK = 256 * 1024
 
 _SEGMENT_RE = re.compile(r"^seg_v(\d+)_(\d{4,})\.m4s$")
 _INIT_RE = re.compile(r"^init_v(\d+)\.mp4$")
+
+
+@dataclass
+class GrowingSource:
+    """A file that is still downloading. The encoder is fed the part that has arrived, in order."""
+
+    total_size: int
+    available: Callable[[], int]  # contiguous bytes from the start of the file
+    # Asks the torrent to fetch the bytes from this offset on first, so they arrive in time.
+    request_window: Callable[[int], None] | None = None
+    # Where the finished file will be (a link to the download): the download itself is removed
+    # once the whole torrent is done, but the data lives on under this name.
+    final_path: str | None = None
+
+    def complete(self) -> bool:
+        return self.available() >= self.total_size
 
 
 class SessionError(Exception):
@@ -62,6 +79,7 @@ class Session:
     has_audio: bool
     audio_is_aac: bool
     encoder: str
+    growing: GrowingSource | None = None
     lock: threading.RLock = field(default_factory=threading.RLock)
     proc: "Popen[bytes] | None" = None
     start_segment: int = 0
@@ -157,7 +175,7 @@ class SessionManager:
 
     # -- lifecycle ---------------------------------------------------------------------------
 
-    def create(self, key: str, source: str, start_seconds: float = 0.0) -> Session:
+    def create(self, key: str, source: str, start_seconds: float = 0.0, growing: GrowingSource | None = None) -> Session:
         """The session for a file, made on first use; its encode starts at `start_seconds`, where
         the viewer is about to resume. Raises SessionError(reason) when it cannot be made."""
         with self._lock:
@@ -212,6 +230,18 @@ class SessionManager:
             self._stop_process(session)
         shutil.rmtree(session.directory, ignore_errors=True)
 
+    def keys(self) -> List[str]:
+        """The files that have an encode session open."""
+        with self._lock:
+            return [s.key for s in self._sessions.values()]
+
+    def close_prefix(self, prefix: str) -> None:
+        """Close every session whose file key starts with `prefix` ("hash/" for a torrent, "hash/name" for a file)."""
+        with self._lock:
+            ids = [s.id for s in self._sessions.values() if s.key.startswith(prefix)]
+        for session_id in ids:
+            self.close(session_id)
+
     def close_all(self) -> None:
         self._closing = True
         for session_id in list(self._sessions):
@@ -265,14 +295,63 @@ class SessionManager:
         session.runs += 1
         # The first run's init segments are the ones the playlists point at; later runs write theirs aside.
         init_prefix = "init" if session.runs == 1 else f"rinit{session.runs}"
+        # A file that is still downloading is read through a pipe, only as far as it has arrived;
+        # once it is whole, the encoder reads it by path and can seek in it.
+        piped = session.growing is not None and not session.growing.complete()
+        source = session.source
+        if not piped and not os.path.exists(source) and session.growing and session.growing.final_path:
+            source = session.growing.final_path
         args = hls_ladder.build_session_args(
             session.ladder, session.src_height, session.encoder, settings.HLS_X264_PRESET,
-            session.segment_seconds, session.source, self._audio_args(session), index, init_prefix,
+            session.segment_seconds, "pipe:0" if piped else source, self._audio_args(session), index, init_prefix,
         )
         with open(os.path.join(session.directory, "ffmpeg.log"), "a") as stderr_log:
-            session.proc = Popen(args, stdin=DEVNULL, stdout=DEVNULL, stderr=stderr_log, cwd=session.directory)
+            session.proc = Popen(
+                args, stdin=PIPE if piped else DEVNULL, stdout=DEVNULL, stderr=stderr_log, cwd=session.directory
+            )
+        if piped and session.growing is not None:
+            threading.Thread(target=self._feed, args=(session.source, session.growing, session.proc), daemon=True).start()
         session.start_segment = index
         log.debug(f"HLS session {session.id[:8]}: encoding from segment {index} ({session.encoder})")
+
+    @staticmethod
+    def _feed(path: str, growing: GrowingSource, proc: "Popen[bytes]") -> None:
+        """Write the downloaded part of the file to the encoder, waiting for more as it arrives."""
+        written = 0
+        next_window_at = 0
+        stdin = proc.stdin
+        if stdin is None:
+            return
+        try:
+            while not os.path.isfile(path):
+                if proc.poll() is not None:
+                    return
+                time.sleep(0.5)
+            with open(path, "rb") as f:
+                while proc.poll() is None:
+                    if growing.request_window is not None and written >= next_window_at:
+                        growing.request_window(written)
+                        next_window_at = written + settings.HLS_PREFETCH_BYTES // 2
+                    # The piece count can run ahead of the bytes flushed to the file.
+                    available = growing.available()
+                    with contextlib.suppress(OSError):
+                        available = min(available, os.path.getsize(path))
+                    if available <= written:
+                        if written >= growing.total_size:
+                            break
+                        time.sleep(0.5)
+                        continue
+                    chunk = f.read(min(PIPE_CHUNK, available - written))
+                    if not chunk:
+                        time.sleep(0.2)
+                        continue
+                    stdin.write(chunk)
+                    written += len(chunk)
+        except (BrokenPipeError, ValueError, OSError):
+            pass  # the encoder was stopped or restarted
+        finally:
+            with contextlib.suppress(Exception):
+                stdin.close()
 
     def _ensure_encoding(self, session: Session, index: int) -> None:
         """Make sure an encoder is, or soon will be, producing segment `index`."""

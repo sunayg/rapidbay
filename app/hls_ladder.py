@@ -190,47 +190,6 @@ def encode_args(
     return args
 
 
-def build_ffmpeg_args(
-    ladder: Sequence[Rendition],
-    src_height: int,
-    encoder: str,
-    preset: str,
-    segment_seconds: int,
-    prefix: str,
-    audio_args: Sequence[str] | None,
-) -> List[str]:
-    """ffmpeg arguments that read the source from stdin and write every rendition.
-
-    `audio_args` are the codec options for the audio stream (copy or AAC encode), or
-    None when the source has no audio. Files are named `{prefix}_v{N}.m3u8`,
-    `{prefix}_v{N}_init.mp4` and `{prefix}_v{N}_seg_%04d.m4s`, relative to the
-    working directory the caller sets.
-    """
-    args: List[str] = ["ffmpeg", "-nostdin"]
-    if encoder == VAAPI:
-        args += ["-init_hw_device", f"vaapi=va:{VAAPI_DEVICE}", "-filter_hw_device", "va"]
-    args += ["-i", "pipe:0", "-sn", "-filter_complex", filter_graph(ladder, src_height, encoder)]
-    for r in ladder:
-        args += ["-map", f"[v{r.index}]"]
-    if audio_args is not None:
-        for _ in ladder:
-            args += ["-map", "0:a:0"]
-    args += encode_args(ladder, encoder, preset, segment_seconds, audio_args)
-    stream_map = " ".join(f"v:{r.index},a:{r.index}" if audio_args is not None else f"v:{r.index}" for r in ladder)
-    args += [
-        "-f", "hls",
-        "-hls_playlist_type", "event",
-        "-hls_segment_type", "fmp4",
-        "-hls_time", str(segment_seconds),
-        "-hls_init_time", str(segment_seconds),
-        "-hls_fmp4_init_filename", f"{prefix}_v{_variant_token(ladder)}_init.mp4",
-        "-hls_segment_filename", f"{prefix}_v%v_seg_%04d.m4s",
-        "-var_stream_map", stream_map,
-        f"{prefix}_v%v.m3u8",
-    ]
-    return args
-
-
 def stream_inf_lines(ladder: Sequence[Rendition], prefix: str, has_audio: bool, subtitles_group: bool) -> List[str]:
     """EXT-X-STREAM-INF entries (tag line plus URI line) for every rendition, best first."""
     lines: List[str] = []

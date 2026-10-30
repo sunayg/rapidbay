@@ -10,12 +10,10 @@ import { get, isAbortError, post, routeTimeout, subscribe } from "../lib/api";
 import {
   canCancelStatus,
   headingFor,
-  hlsLink,
   isAppleBrowser,
   isHlsLink,
   mp4Link,
   playLinkIdentity,
-  STREAM_STARTING,
   streamDeclinedMessage,
   subheadingFor,
   subtitleTracks,
@@ -42,8 +40,6 @@ const playLink = ref<string | null>(null);
 const subtitles = ref<SubtitleTrack[]>([]);
 const supported = ref<boolean | null>(null);
 const downloadProgress = ref<number | null>(null);
-const canStream = ref(false);
-const streamRequested = ref(false);
 const hlsFailed = ref(false);
 const streamMessage = ref<string | null>(null);
 const cancelling = ref(false);
@@ -74,39 +70,21 @@ function applyFileInfo(data: FileInfo): void {
   heading.value = headingFor(data);
   subheading.value = subheadingFor(data);
 
-  // Play the adaptive HLS stream whenever there is one, even once the MP4 is ready:
-  // switching to the MP4 would drop the quality levels and restart the player. The
-  // MP4 is for files that were converted without a stream.
-  if (data.hls_filename && !hlsFailed.value) {
-    const link = hlsLink(hash.value, data.hls_filename, (data.hls_subtitles || []).length);
-    // Never swap an encode session for an older stream of the same file.
-    if (!playLink.value || (isHlsLink(playLink.value) && !playLink.value.startsWith("/api/hls/"))) {
-      if (playLink.value !== link) playLink.value = link;
-      supported.value = true;
-    }
-  } else if (data.status === "ready" && data.filename) {
-    if (data.playback === "session") {
-      // Nothing to link yet: ask the server for an encode session, resuming where the viewer left off.
-      if (!playLink.value) void openSession();
-    } else {
-      const link = mp4Link(hash.value, data.filename);
-      if (playLink.value !== link) playLink.value = link;
-      supported.value = !!data.supported;
-    }
+  // An MP4 the browser can play as it is plays directly. Anything else plays through an encode
+  // session, which also works while the file is still downloading.
+  if (data.status === "ready" && data.filename && data.playback === "direct") {
+    const link = mp4Link(hash.value, data.filename);
+    if (playLink.value !== link) playLink.value = link;
+    supported.value = !!data.supported;
+  } else if (!playLink.value && !hlsFailed.value && (data.can_stream || data.status === "ready")) {
+    void openSession(data.status === "ready");
   }
   downloadProgress.value = data.status !== "ready" ? data.progress || null : null;
 
-  // <track> subtitles are for MP4 only; HLS declares them in the playlist.
-  const playingHls = isHlsLink(playLink.value);
-  if (!isAppleBrowser() && !playingHls) subtitles.value = subtitleTracks(hash.value, data.subtitles || []);
-  else if (playingHls) subtitles.value = [];
-
-  canStream.value = !!data.can_stream;
-  // can_stream means no stream is running, so a requested one was reaped:
-  // re-arm the button.
-  if (canStream.value && streamRequested.value) streamRequested.value = false;
-  if (data.hls_pending) streamMessage.value = STREAM_STARTING;
-  else if (streamMessage.value === STREAM_STARTING) streamMessage.value = null;
+  // <track> subtitles are for a directly played MP4; an encode session declares them in its playlist.
+  const playingSession = isHlsLink(playLink.value);
+  if (!isAppleBrowser() && !playingSession) subtitles.value = subtitleTracks(hash.value, data.subtitles || []);
+  else if (playingSession) subtitles.value = [];
 }
 
 function poll(): void {
@@ -129,9 +107,12 @@ function poll(): void {
 
 let sessionRequested = false;
 
-async function openSession(): Promise<void> {
+// Asks the server for an encode session, resuming where the viewer left off. While the file
+// is still downloading, a refusal is only a message (and a later try); once it is ready, it is an error.
+async function openSession(ready: boolean): Promise<void> {
   if (sessionRequested) return;
   sessionRequested = true;
+  streamMessage.value = null;
   try {
     const start = getVideoPosition(magnet.value, filename.value);
     const data = await post<{ url?: string | null; reason?: string }>(
@@ -141,31 +122,20 @@ async function openSession(): Promise<void> {
     if (data && data.url) {
       playLink.value = data.url;
       supported.value = true;
-    } else {
+      return;
+    }
+    const reason = data && data.reason;
+    if (ready) {
       sessionRequested = false;
-      failed.value = data && data.reason === "capacity" ? "Too many videos are playing. Try again in a minute." : "Could not start playback.";
+      failed.value = streamDeclinedMessage(reason);
+    } else {
+      streamMessage.value = streamDeclinedMessage(reason);
+      // Not ready or at capacity: try again in a moment. Other reasons will not change.
+      if (reason === "not_ready" || reason === "capacity") routeTimeout(() => (sessionRequested = false), 5000);
     }
   } catch {
     sessionRequested = false;
     if (alive) failed.value = "Lost contact with the server.";
-  }
-}
-
-async function startStream(): Promise<void> {
-  streamRequested.value = true;
-  streamMessage.value = null;
-  try {
-    const data = await post<{ started?: boolean; reason?: string }>(
-      "/api/magnet/" + hash.value + "/" + encodeURIComponent(filename.value) + "/stream",
-    );
-    if (!alive || (data && data.started)) return;
-    // The backend declined: re-show the play button and say why.
-    streamRequested.value = false;
-    streamMessage.value = streamDeclinedMessage(data && data.reason);
-  } catch {
-    if (!alive) return;
-    streamRequested.value = false;
-    streamMessage.value = streamDeclinedMessage(undefined);
   }
 }
 
@@ -183,8 +153,6 @@ async function cancelDownload(): Promise<void> {
 // HLS playback failed (e.g. unsupported codec): drop back to the progress view.
 function onStreamError(): void {
   playLink.value = null;
-  streamRequested.value = false;
-  canStream.value = false;
   hlsFailed.value = true;
 }
 
@@ -234,9 +202,8 @@ watch([magnet, filename], () => {
   progress.value = null;
   playLink.value = null;
   subtitles.value = [];
-  canStream.value = false;
-  streamRequested.value = false;
   hlsFailed.value = false;
+  sessionRequested = false;
   streamMessage.value = null;
   cancelling.value = false;
   heading.value = "";
@@ -264,16 +231,6 @@ watch([magnet, filename], () => {
       <BackButton :fallback="backTarget" />
       <h1 class="dl-title" :title="filename">{{ filename }}</h1>
       <div class="dl-actions">
-        <button
-          v-if="canStream && !streamRequested"
-          type="button"
-          class="icon-btn stream-btn"
-          title="Stream while downloading"
-          aria-label="Stream while downloading"
-          @click="startStream"
-        >
-          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M8 5l11 7-11 7z" /></svg>
-        </button>
         <FavoriteButton :magnet="magnet" :filename="filename" />
         <FullscreenButton />
       </div>

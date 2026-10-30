@@ -120,3 +120,110 @@ def test_close_removes_the_session_directory(tmp_path):
     manager.close(session.id)
     assert not os.path.exists(directory)
     assert manager.get(session.id) is None
+
+
+class _FakeStdin:
+    def __init__(self) -> None:
+        self.data = b""
+        self.closed = False
+
+    def write(self, chunk: bytes) -> int:
+        self.data += chunk
+        return len(chunk)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakeProc:
+    def __init__(self) -> None:
+        self.stdin = _FakeStdin()
+        self.returncode = None
+
+    def poll(self):
+        return self.returncode
+
+
+def test_the_feeder_sends_only_what_has_arrived_and_finishes_when_the_file_is_whole(tmp_path, monkeypatch):
+    monkeypatch.setattr(hs.time, "sleep", lambda _s: None)
+    path = tmp_path / "movie.mkv"
+    path.write_bytes(bytes(range(256)) * 4)  # 1024 bytes on disk (sparse in a real download)
+    arrived = [300]
+    windows: list[int] = []
+    growing = hs.GrowingSource(total_size=1024, available=lambda: arrived[0], request_window=windows.append)
+    proc = _FakeProc()
+
+    # Let the "download" finish once the feeder has caught up with the first part.
+    def more(_seconds):
+        arrived[0] = 1024
+
+    monkeypatch.setattr(hs.time, "sleep", more)
+    hs.SessionManager._feed(str(path), growing, proc)  # type: ignore[arg-type]
+
+    assert proc.stdin.data == path.read_bytes()
+    assert proc.stdin.closed
+    assert windows and windows[0] == 0  # it asked the torrent for the bytes it was about to need
+
+
+def test_the_feeder_never_reads_past_what_the_torrent_has_confirmed(tmp_path, monkeypatch):
+    path = tmp_path / "movie.mkv"
+    path.write_bytes(b"x" * 1000)
+    proc = _FakeProc()
+    growing = hs.GrowingSource(total_size=1000, available=lambda: 400)
+
+    def stop(_s):
+        proc.returncode = 0  # the encoder ends while the feeder waits for more
+
+    monkeypatch.setattr(hs.time, "sleep", stop)
+    hs.SessionManager._feed(str(path), growing, proc)  # type: ignore[arg-type]
+
+    assert len(proc.stdin.data) == 400
+
+
+def test_a_download_in_progress_is_encoded_from_a_pipe_and_a_finished_one_by_path(tmp_path, monkeypatch):
+    manager = hs.SessionManager(str(tmp_path))
+    session = _session(directory=str(tmp_path))
+    session.source = str(tmp_path / "missing-download.mkv")  # the download folder is gone
+    final = tmp_path / "final.mkv"
+    final.write_bytes(b"x")
+    arrived = [10]
+    session.growing = hs.GrowingSource(total_size=100, available=lambda: arrived[0], final_path=str(final))
+    launched: list[tuple[list[str], object]] = []
+
+    class Spawned(_FakeProc):
+        def send_signal(self, _sig):
+            return None
+
+        def terminate(self):
+            self.returncode = -15
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    def fake_popen(args, stdin=None, **_kw):
+        launched.append((args, stdin))
+        return Spawned()
+
+    monkeypatch.setattr(hs, "Popen", fake_popen)
+    monkeypatch.setattr(hs.threading, "Thread", lambda **_kw: type("T", (), {"start": lambda self: None})())
+    manager._start_process(session, 0)
+    args, stdin = launched[-1]
+    assert args[args.index("-i") + 1] == "pipe:0" and stdin == hs.PIPE
+
+    arrived[0] = 100  # complete: read the file by path, so seeking works, from where it now lives
+    manager._start_process(session, 4)
+    args, stdin = launched[-1]
+    assert args[args.index("-i") + 1] == str(final) and stdin == hs.DEVNULL
+    assert args[args.index("-ss") + 1] == "24"
+
+
+def test_sessions_for_a_torrent_or_file_are_closed_by_prefix(tmp_path):
+    manager = hs.SessionManager(str(tmp_path))
+    for name in ("h1/a.mkv", "h1/b.mkv", "h2/a.mkv"):
+        s = _session(directory=str(tmp_path / name.replace("/", "_")))
+        s.id, s.key = name, name
+        manager._sessions[name] = s
+    manager.close_prefix("h1/a.mkv")
+    assert sorted(manager.keys()) == ["h1/b.mkv", "h2/a.mkv"]
+    manager.close_prefix("h1/")
+    assert manager.keys() == ["h2/a.mkv"]

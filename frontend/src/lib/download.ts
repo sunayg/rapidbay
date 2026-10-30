@@ -10,9 +10,6 @@ export interface FileInfo {
   download_rate?: number | null;
   filename?: string;
   supported?: boolean;
-  hls_filename?: string;
-  hls_subtitles?: string[];
-  hls_pending?: boolean;
   subtitles?: string[];
   can_stream?: boolean;
   // "direct": the browser plays the file as it is. "session": it is encoded on demand.
@@ -48,19 +45,13 @@ export function isHlsLink(link: string | null): boolean {
   return !!link && link.indexOf(".m3u8") !== -1;
 }
 
-// The link identity ignores the query string (the ?subs= cache-buster).
+// The link identity ignores any query string.
 export function playLinkIdentity(link: string): string {
   return link.split("?")[0];
 }
 
 export function mp4Link(hash: string, filename: string): string {
   return "/play/" + hash + "/" + encodeURIComponent(filename);
-}
-
-// The HLS link is tagged with the subtitle count so a regenerated master
-// playlist is refetched by hls.js when new VTTs arrive.
-export function hlsLink(hash: string, hlsFilename: string, subtitleCount: number): string {
-  return "/play/" + hash + "/" + encodeURIComponent(hlsFilename) + "?subs=" + subtitleCount;
 }
 
 export function subtitleTracks(hash: string, subtitles: string[]): SubtitleTrack[] {
@@ -71,9 +62,8 @@ export function subtitleTracks(hash: string, subtitles: string[]): SubtitleTrack
 }
 
 export const STREAM_REASONS: Record<string, string> = {
-  disabled: "Streaming is disabled.",
-  unsupported_format: "This file format can't be streamed live.",
-  codec_failed: "Streaming failed for this file's codec.",
+  unsupported_format: "This file can't be played while it downloads. It will play once it has finished.",
+  unreadable: "This file couldn't be read.",
   capacity: "Server is at streaming capacity. Try again shortly.",
   not_ready: "Not enough data buffered yet — wait a moment.",
   no_torrent: "Torrent isn't ready yet.",
@@ -81,10 +71,8 @@ export const STREAM_REASONS: Record<string, string> = {
   invalid_path: "Invalid filename.",
 };
 
-export const STREAM_STARTING = "Starting stream…";
-
 export function streamDeclinedMessage(reason: string | undefined): string {
-  return (reason && STREAM_REASONS[reason]) || "Couldn't start the stream.";
+  return (reason && STREAM_REASONS[reason]) || "Couldn't start playback.";
 }
 
 export function isAppleBrowser(vendor: string = navigator.vendor): boolean {

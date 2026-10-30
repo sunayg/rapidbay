@@ -52,14 +52,9 @@ MOVE_RESULTS_TO_BOTTOM_CONTAINING_STRINGS: List[str] = ["XviD"]
 SUBTITLE_LANGUAGES: List[str] = ["en"]  # list of languages, e.g. ["en", "de", "es"]
 
 # CONVERSION
-CONVERT_VIDEO: bool = True
-VIDEO_CONVERSION_PARAMS: str = "libx264 -preset ultrafast"
 AAC_BITRATE: str = "256k"
 AAC_CHANNELS: int = 2
-INCOMPLETE_POSTFIX: str = ".incomplete"
-LOG_POSTFIX: str = ".log"
 MAX_OUTPUT_FILE_AGE: int = 10  # hours
-MAX_PARALLEL_CONVERSIONS: int = 2
 
 OPENSUBTITLES_USERNAME: str | None = None
 OPENSUBTITLES_PASSWORD: str | None = None
@@ -78,9 +73,7 @@ HLS_ENCODER: str = "auto"  # auto, software or vaapi
 HLS_X264_PRESET: str = "veryfast"  # software encoder speed/quality trade-off
 HLS_SEGMENT_DURATION: int = 6  # seconds per HLS segment
 HLS_START_THRESHOLD: int = 50 * 1024 * 1024  # bytes of sequential data before starting HLS
-MAX_PARALLEL_HLS_STREAMS: int = 2  # cap on concurrent HLS ffmpeg processes (independent of MAX_PARALLEL_CONVERSIONS)
-HLS_STALL_TIMEOUT: int = 180  # seconds without progress before an HLS stream is killed and its slot freed
-HLS_VIEWER_TIMEOUT: int = 300  # seconds without any client polling the file's status before an active HLS stream is stopped and its slot freed
+MAX_PARALLEL_HLS_STREAMS: int = 2  # cap on concurrent encode sessions
 HLS_PREFETCH_BYTES: int = 32 * 1024 * 1024  # rolling deadline-rushed window the streamer keeps ahead of the pipe feeder
 
 # Built-in defaults and the values that came from the environment, kept so the

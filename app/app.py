@@ -261,8 +261,7 @@ class StatusResponse(BaseModel):
     subtitle_downloads: Any
     torrent_downloads: Any
     session_torrents: List[str]
-    conversions: Any
-    hls_streams: Any
+    sessions: List[str]
 
 # Global daemon instance
 daemon: RapidBayDaemon
@@ -1236,7 +1235,7 @@ def magnet_download(
     if not magnet_link or not filename:
         raise HTTPException(status_code=400, detail="magnet_link and filename required")
     magnet_hash: str = torrent.get_hash(magnet_link)
-    if daemon.get_file_status(magnet_hash, filename)["status"] not in (FileStatus.READY, FileStatus.CONVERTING):
+    if daemon.get_file_status(magnet_hash, filename, viewer=False)["status"] != FileStatus.READY:
         daemon.download_file(magnet_link, filename)
     return {"magnet_hash": magnet_hash}
 
@@ -1245,11 +1244,6 @@ def magnet_download(
 def cancel_download(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, str]:
     daemon.cancel_download(magnet_hash, filename)
     return {"magnet_hash": magnet_hash}
-
-
-@app.post("/api/magnet/{magnet_hash}/{filename}/stream")
-def start_stream(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
-    return daemon.start_hls_stream(magnet_hash, filename)
 
 
 class SessionResponse(BaseModel):
@@ -1298,9 +1292,6 @@ def session_file(session_id: str, name: str, _: None = Depends(authorize)) -> Re
 
 
 def _file_status(magnet_hash: str, filename: str) -> Dict[str, Any]:
-    # Viewer-liveness heartbeat: active HLS streams are reaped when no client
-    # has polled the file's status for HLS_VIEWER_TIMEOUT.
-    daemon.note_file_poll(magnet_hash, filename)
     status = daemon.get_file_status(magnet_hash, filename)
     # Reset expiration timer when file is accessed
     if status.get("status") == FileStatus.READY:
@@ -1393,14 +1384,13 @@ def _files(magnet_hash: str) -> Dict[str, Any]:
         # Get status for each file
         file_statuses: Dict[str, str] = {}
         for filename in files_list:
-            status_info = daemon.get_file_status(magnet_hash, filename)
+            status_info = daemon.get_file_status(magnet_hash, filename, viewer=False)
             status = status_info.get("status")
             if status == FileStatus.READY:
                 file_statuses[filename] = "downloaded"
-            elif status in (FileStatus.DOWNLOADING, FileStatus.CONVERTING,
-                          FileStatus.FINISHING_UP, FileStatus.DOWNLOADING_SUBTITLES,
+            elif status in (FileStatus.DOWNLOADING, FileStatus.DOWNLOADING_SUBTITLES,
                           FileStatus.DOWNLOADING_SUBTITLES_FROM_TORRENT,
-                          FileStatus.DOWNLOAD_FINISHED, FileStatus.WAITING_FOR_CONVERSION):
+                          FileStatus.DOWNLOAD_FINISHED, FileStatus.READY_TO_COPY):
                 file_statuses[filename] = "downloading"
         return {"files": files_list, "file_statuses": file_statuses}
     return {"files": None}
@@ -1450,8 +1440,7 @@ def status(_: None = Depends(authorize)) -> Dict[str, Any]:
         "subtitle_downloads": dict(daemon.subtitle_downloads),
         "torrent_downloads": daemon.downloads(),
         "session_torrents": daemon.session_torrents(),
-        "conversions": dict(daemon.video_converter.file_conversions),
-        "hls_streams": list(daemon.hls_streamer.active_streams.keys()),
+        "sessions": daemon.sessions.keys(),
     }
 
 

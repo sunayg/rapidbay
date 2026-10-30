@@ -13,8 +13,7 @@ def _daemon(status: str, priorities: list[int]):
     daemon.torrent_client = MagicMock()
     daemon.torrent_client.locks = LockManager()
     daemon.torrent_client.torrents = {HASH: handle}
-    daemon.hls_streamer = MagicMock()
-    daemon._file_poll_times = {}
+    daemon.sessions = MagicMock()
     daemon._head_rushes = {}
     daemon._web_seeded = {HASH: {"a.mkv"}}
     daemon._notify_state_change = MagicMock()
@@ -59,14 +58,22 @@ def test_cancelling_also_drops_the_files_subtitles():
     daemon._discard_torrent.assert_called_once_with(HASH, handle)
 
 
-def test_files_that_are_converting_or_ready_are_left_alone():
-    for status in (FileStatus.READY, FileStatus.FINISHING_UP, FileStatus.CONVERTING):
-        daemon, _ = _daemon(status, [4])
+def test_a_finished_file_is_left_alone():
+    daemon, _ = _daemon(FileStatus.READY, [4])
 
-        prioritize = _cancel(daemon)
+    prioritize = _cancel(daemon)
 
-        prioritize.assert_not_called()
-        daemon._discard_torrent.assert_not_called()
+    prioritize.assert_not_called()
+    daemon._discard_torrent.assert_not_called()
+    daemon.sessions.close_prefix.assert_not_called()
+
+
+def test_cancelling_ends_the_files_encode_session():
+    daemon, _ = _daemon(FileStatus.DOWNLOADING, [4, 4])
+
+    _cancel(daemon)
+
+    daemon.sessions.close_prefix.assert_called_once_with(f"{HASH}/a.mkv")
 
 
 def test_unknown_torrent_hash_or_file_is_a_no_op():

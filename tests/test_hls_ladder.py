@@ -4,7 +4,6 @@ from hls_ladder import (
     VAAPI,
     Rendition,
     bitrate_for_height,
-    build_ffmpeg_args,
     plan_ladder,
     stream_inf_lines,
 )
@@ -56,41 +55,9 @@ def test_bandwidth_is_peak_video_plus_audio():
     assert r.bandwidth == (int(2800 * 1.07) + 128) * 1000
 
 
-def test_software_ffmpeg_args():
-    ladder = plan_ladder(1920, 1080, HEIGHTS)
-    args = build_ffmpeg_args(ladder, 1080, SOFTWARE, "veryfast", 6, "stream", ["-c:a", "aac", "-b:a", "128k"])
-    joined = " ".join(args)
-    assert args[:2] == ["ffmpeg", "-nostdin"] and "pipe:0" in args
-    graph = args[args.index("-filter_complex") + 1]
-    assert graph.startswith("[0:v:0]format=yuv420p,split=4[s0][s1][s2][s3]")
-    assert "[s0]null[v0]" in graph  # the top rung is not rescaled
-    assert "[s1]scale=1280:720[v1]" in graph and "[s3]scale=640:360[v3]" in graph
-    assert args.count("-map") == 8  # four video plus four audio
-    assert "-b:v:1 2800k" in joined and "-maxrate:v:1 2996k" in joined and "-bufsize:v:1 5600k" in joined
-    assert "-preset veryfast" in joined and "-sc_threshold 0" in joined
-    assert "expr:gte(t,n_forced*6)" in joined  # keyframes at every segment boundary on every rung
-    assert "-var_stream_map v:0,a:0 v:1,a:1 v:2,a:2 v:3,a:3" in joined
-    assert "-hls_fmp4_init_filename stream_v%v_init.mp4" in joined
-    assert args[-1] == "stream_v%v.m3u8"
-    assert "-copyts" not in joined and "copy" not in args  # nothing is stream-copied on the video side
-
-
-def test_source_without_audio_has_no_audio_maps():
-    ladder = plan_ladder(1280, 720, HEIGHTS)
-    args = build_ffmpeg_args(ladder, 720, SOFTWARE, "veryfast", 6, "s", None)
-    assert "0:a:0" not in args
-    assert args[args.index("-var_stream_map") + 1] == "v:0 v:1 v:2"
-
-
-def test_single_rendition_graph_does_not_split():
-    ladder = plan_ladder(320, 240, HEIGHTS)
-    args = build_ffmpeg_args(ladder, 240, SOFTWARE, "veryfast", 6, "s", None)
-    assert args[args.index("-filter_complex") + 1] == "[0:v:0]format=yuv420p[s0];[s0]null[v0]"
-
-
 def test_vaapi_args_upload_frames_and_scale_on_the_gpu():
     ladder = plan_ladder(1920, 1080, [1080, 720])
-    args = build_ffmpeg_args(ladder, 1080, VAAPI, "veryfast", 6, "s", ["-c:a", "aac"])
+    args = hls_ladder.build_session_args(ladder, 1080, VAAPI, "veryfast", 6, "/in.mkv", ["-c:a", "aac"], 0, "init")
     joined = " ".join(args)
     assert "-init_hw_device vaapi=va:/dev/dri/renderD128 -filter_hw_device va" in joined
     graph = args[args.index("-filter_complex") + 1]
@@ -129,8 +96,6 @@ def test_encoder_detection_prefers_software_unless_vaapi_really_works(monkeypatc
 def test_a_single_rendition_names_its_init_file_without_a_placeholder():
     # ffmpeg leaves %v in the init file name untouched when there is only one rendition.
     one = plan_ladder(320, 240, HEIGHTS)
-    args = build_ffmpeg_args(one, 240, SOFTWARE, "veryfast", 6, "s", None)
-    assert args[args.index("-hls_fmp4_init_filename") + 1] == "s_v0_init.mp4"
     session = hls_ladder.build_session_args(one, 240, SOFTWARE, "veryfast", 6, "/in.mkv", None, 0, "init")
     assert session[session.index("-hls_fmp4_init_filename") + 1] == "init_v0.mp4"
     many = plan_ladder(1920, 1080, HEIGHTS)

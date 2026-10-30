@@ -14,7 +14,7 @@ const payload: SettingsPayload = {
   ],
   fields: [
     field({ key: "HLS_SEGMENT_DURATION", category: "streaming", kind: "int", label: "Segment", value: 6 }),
-    field({ key: "HLS_STALL_TIMEOUT", category: "streaming", kind: "int", label: "Stall", value: 180 }),
+    field({ key: "HLS_SEGMENT_DURATION", category: "streaming", kind: "int", label: "Segment", value: 6 }),
     field({ key: "TMDB_API_KEY", category: "subtitles", kind: "str", label: "TMDB", secret: true, is_set: true }),
   ],
 };
