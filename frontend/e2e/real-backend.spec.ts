@@ -184,10 +184,10 @@ test("real next_file: the player knows the following file of the pack", async ({
   expect(next).toEqual({ next_filename: TWO, next_magnet: null });
 });
 
-test("real HLS: plays the backend's master playlist, then hands over to the MP4 at the same position", async ({ page, request }) => {
+test("real HLS: plays the backend's master playlist and stays on it when the MP4 appears", async ({ page, request }) => {
   test.setTimeout(60_000);
   const status = await (await request.get(`/api/magnet/${HLS_HASH}/${encodeURIComponent(ONE)}`)).json();
-  test.skip(!status.hls_filename, `HLS_STREAMING is off on this stack: ${JSON.stringify(status)}`);
+  expect(status.hls_filename, JSON.stringify(status)).toBeTruthy();
   // The backend wrapped our media playlist in a master playlist of its own.
   expect(status.hls_filename).toBe(`${stem(ONE)}_master.m3u8`);
   const master = await (await request.get(`/play/${HLS_HASH}/${status.hls_filename}`)).text();
@@ -207,12 +207,11 @@ test("real HLS: plays the backend's master playlist, then hands over to the MP4 
   docker("cp", join(FIXTURES, "sample.mp4"), `${CONTAINER}:${outputDir}/${HLS_HASH}/.${stem(ONE)}.mp4.tmp`);
   s = await stat(page);
   inContainer("mv", `${outputDir}/${HLS_HASH}/.${stem(ONE)}.mp4.tmp`, `${outputDir}/${HLS_HASH}/${stem(ONE)}.mp4`);
-  await expect.poll(async () => (await stat(page)).src, { timeout: 15_000 }).toContain(`/play/${HLS_HASH}/${stem(ONE)}.mp4`);
-  await expect.poll(async () => (await stat(page)).ready, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+  // The player is not handed over: it stays on the stream and keeps playing.
+  await playing(page, s.t + 2);
   const after = await stat(page);
-  expect(after.t).toBeGreaterThanOrEqual(s.t - 0.5);
-  expect(after.t).toBeLessThan(s.t + 6);
-  await playing(page, after.t + 0.5);
+  expect(after.src).toMatch(/^blob:/);
+  expect(after.t).toBeGreaterThan(s.t);
   expect(errors).toEqual([]);
 });
 

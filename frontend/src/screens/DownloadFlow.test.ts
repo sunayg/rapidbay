@@ -381,7 +381,7 @@ describe("download screen", () => {
     expect(wrapper.find(".stream-message").exists()).toBe(false);
   });
 
-  it("hands over to the player with the HLS link while downloading, then the MP4 when ready", async () => {
+  it("plays the HLS link while downloading and keeps it, in the same player, once the file is ready", async () => {
     const { wrapper } = await download();
     const source = FakeEventSource.last("/api/magnet_events/");
     source.emit(info({ hls_filename: "hls/master.m3u8", hls_subtitles: ["a_eng.vtt"], subtitles: ["a_eng.vtt"] }));
@@ -399,13 +399,14 @@ describe("download screen", () => {
     const same = wrapper.findComponent({ name: "PlayerHost" });
     expect(same.element).toBe(host.element);
     expect(same.props("url")).toContain("?subs=2");
-    // Done: MP4 handover with <track> subtitles.
-    source.emit(info({ status: "ready", progress: 1, filename: "Show.S01E01.mp4", supported: true, subtitles: ["Show_eng.vtt"], hls_filename: "hls/master.m3u8" }));
+    // Done: the MP4 exists, but the viewer stays on the adaptive stream (no handover).
+    source.emit(info({ status: "ready", progress: 1, filename: "Show.S01E01.mp4", supported: true, subtitles: ["Show_eng.vtt"], hls_filename: "hls/master.m3u8", hls_subtitles: ["a_eng.vtt", "a_nld.vtt"] }));
     await flushPromises();
-    const mp4 = wrapper.findComponent({ name: "PlayerHost" });
-    expect(mp4.props("url")).toBe(`/play/${HASH}/Show.S01E01.mp4`);
-    expect(mp4.props("subtitles")).toEqual([{ language: "eng", url: `/play/${HASH}/Show_eng.vtt` }]);
-    expect(mp4.props("downloadProgress")).toBeNull();
+    const still = wrapper.findComponent({ name: "PlayerHost" });
+    expect(still.element).toBe(host.element);
+    expect(still.props("url")).toContain("hls%2Fmaster.m3u8");
+    expect(still.props("subtitles")).toEqual([]);
+    expect(still.props("downloadProgress")).toBeNull();
   });
 
   it("goes straight to the MP4 player when ready", async () => {

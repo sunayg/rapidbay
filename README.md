@@ -14,6 +14,7 @@ Rapid bay is a self hosted video service/torrent client that makes playing video
 -   Pick individual video files you want to play and the system takes care of the rest to make it streamable.
 -   Automatic download of Closed Captions/Subtitles
 -   Automatically converts the video file and subtitles to be playable on all browsers/chromecast/appletv
+-   Plays while it converts: the video is encoded on the fly into several quality levels and the player switches between them to match your connection speed
 -   Automatically converts audio that is unsupported by browsers to AAC
 -   Allows registering as a handler for any magnet link
 -   Automatically cleans up disk space so you don't need to manage it yourself
@@ -150,6 +151,15 @@ docker-compose up
 -   For Real Debrid, set the env variable RD_TOKEN to the one on https://real-debrid.com/apitoken
 -   For TorBox, set the env variable TB_TOKEN to your API key from https://torbox.app/settings
 -   If both are set, Real Debrid is tried first and TorBox is used as a fallback
+
+## Adaptive streaming
+
+Playback starts from the first encoded segments, before the download or conversion has finished. One ffmpeg process decodes the file once and encodes every quality level (1080p, 720p, 480p and 360p by default, never above the source size) as HLS. The player picks a level from the measured connection speed, and the quality menu in the player lets you pin one. When the whole file has been encoded, the top level is copied into the MP4 that Kodi and the rest of the app use. Files nobody watched are still converted to MP4 in one go.
+
+- **Quality levels:** edit them in Settings, under Streaming.
+- **Hardware encoding:** `HLS_ENCODER=auto` (the default) tries VAAPI when `/dev/dri/renderD128` exists and a bitrate-capped test encode works, and falls back to software x264 otherwise. `HLS_ENCODER=software` or `vaapi` forces one. The local compose file maps `/dev/dri` into the container. Some Intel iGPUs only offer constant-quality VAAPI encoding, which cannot honour the bitrates, so they use software encoding.
+- **Speed:** each stream must encode faster than real time, and every quality level adds CPU. With software encoding, drop the highest levels in Settings, or set `HLS_X264_PRESET` to `superfast`, if playback stalls. `MAX_PARALLEL_HLS_STREAMS` limits concurrent streams.
+- **Resuming late in a file:** the encode starts at the beginning, so resuming far into a file waits until the encoder reaches that point.
 
 ## Responsible use
 

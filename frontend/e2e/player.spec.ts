@@ -128,7 +128,7 @@ test("an MP4 really plays, seeks, pauses, and shows captions", async ({ page }) 
   // Captions: off at first, then English from the menu.
   const showing = () => video(page).evaluate((v: HTMLVideoElement) => Array.from(v.textTracks).map((t) => `${t.language}:${t.mode}`));
   await expect.poll(showing).toEqual(["eng:disabled", "nld:disabled"]);
-  await page.getByRole("button", { name: "Audio and subtitles" }).click();
+  await page.getByRole("button", { name: "Quality, audio and subtitles" }).click();
   await page.getByRole("menuitemradio", { name: "English" }).click();
   await expect.poll(showing).toEqual(["eng:showing", "nld:disabled"]);
   await expect
@@ -169,7 +169,7 @@ test("the position is resumed, and saved when leaving", async ({ page }) => {
   expect(saved.duration).toBeGreaterThan(9);
 });
 
-test("HLS plays through hls.js while downloading, then swaps to the MP4 at the same position", async ({ page }) => {
+test("HLS plays through hls.js while downloading and stays on the stream once the file is ready", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const mocks = await mockStack(page, { status: "downloading", progress: 0.4, hls_filename: "hls/master.m3u8", hls_subtitles: [], peers: 3 });
@@ -185,13 +185,12 @@ test("HLS plays through hls.js while downloading, then swaps to the MP4 at the s
 
   s = await stat(page);
   mocks.info.current = { ...READY, hls_filename: "hls/master.m3u8" };
-  await expect.poll(async () => (await stat(page)).src, { timeout: 10_000 }).toMatch(/sample\.mp4$/);
-  await expect.poll(async () => (await stat(page)).ready, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+  // No handover: the player keeps the adaptive stream (and its quality levels) and keeps playing.
+  await playing(page, s.t + 2);
   const after = await stat(page);
-  expect(after.t).toBeGreaterThanOrEqual(s.t - 0.5);
-  expect(after.t).toBeLessThan(s.t + 5);
+  expect(after.src).toMatch(/^blob:/);
+  expect(after.t).toBeGreaterThan(s.t);
   await expect(page.locator(".player-badge")).toHaveCount(0);
-  await playing(page, s.t + 0.5);
   expect(errors).toEqual([]);
 });
 
@@ -263,7 +262,7 @@ test("layout: desktop, phone and fullscreen screenshots", async ({ page }, info)
   mocks.nextFile.current = { next_filename: NEXT_FILE, next_magnet: null }; // the widest row: Next button too
   await page.goto(magnetUrl(FILE));
   await playing(page, 0.5);
-  await page.getByRole("button", { name: "Audio and subtitles" }).click();
+  await page.getByRole("button", { name: "Quality, audio and subtitles" }).click();
   await page.getByRole("menuitemradio", { name: "English" }).click();
   const shot = (name: string) => page.screenshot({ path: info.outputPath(`${name}.png`) });
   await shot("player-desktop");

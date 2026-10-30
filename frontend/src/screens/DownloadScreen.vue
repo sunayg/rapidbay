@@ -74,17 +74,19 @@ function applyFileInfo(data: FileInfo): void {
   heading.value = headingFor(data);
   subheading.value = subheadingFor(data);
 
-  // Prefer the MP4 once ready; HLS only gives early playback before that.
-  if (data.status === "ready" && data.filename) {
-    const link = mp4Link(hash.value, data.filename);
-    if (playLink.value !== link) playLink.value = link;
-    supported.value = !!data.supported;
-  } else if (data.hls_filename && !hlsFailed.value) {
+  // Play the adaptive HLS stream whenever there is one, even once the MP4 is ready:
+  // switching to the MP4 would drop the quality levels and restart the player. The
+  // MP4 is for files that were converted without a stream.
+  if (data.hls_filename && !hlsFailed.value) {
     const link = hlsLink(hash.value, data.hls_filename, (data.hls_subtitles || []).length);
     if (!playLink.value || isHlsLink(playLink.value)) {
       if (playLink.value !== link) playLink.value = link;
       supported.value = true;
     }
+  } else if (data.status === "ready" && data.filename) {
+    const link = mp4Link(hash.value, data.filename);
+    if (playLink.value !== link) playLink.value = link;
+    supported.value = !!data.supported;
   }
   downloadProgress.value = data.status !== "ready" ? data.progress || null : null;
 

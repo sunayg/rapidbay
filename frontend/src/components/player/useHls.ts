@@ -1,5 +1,5 @@
-// hls.js wiring for early playback: the stream is played while the file is
-// still being converted. hls.js is a separate chunk, loaded only for .m3u8 links.
+// hls.js wiring: the stream is played while the file is still being encoded, at the
+// quality the connection allows. hls.js is a separate chunk, loaded only for .m3u8 links.
 import type HlsType from "hls.js";
 
 export const MAX_HLS_RECOVERIES = 5;
@@ -8,9 +8,16 @@ export async function loadHls(): Promise<typeof HlsType> {
   return (await import("hls.js")).default;
 }
 
+export interface QualityLevel {
+  index: number;
+  height: number;
+}
+
 export interface HlsHandle {
   // Swap the playlist (new subtitles arrived) and keep the position and play state.
   reload(url: string): void;
+  // Pick a rendition by index, or -1 to let the player choose from the connection speed.
+  setQuality(index: number): void;
   destroy(): void;
 }
 
@@ -19,6 +26,10 @@ export interface HlsOptions {
   onFatal: () => void;
   // Whether the playlist is still growing; the length is unknown until it is not.
   onLive: (live: boolean) => void;
+  // The renditions the stream offers, best first. Empty or one entry: nothing to choose.
+  onLevels?: (levels: QualityLevel[]) => void;
+  // The rendition currently playing (it changes as the connection does).
+  onLevelSwitch?: (index: number) => void;
 }
 
 export function playSafely(video: HTMLVideoElement): void {
@@ -46,6 +57,10 @@ export async function attachHls(video: HTMLVideoElement, url: string, options: H
     // Subtitles come from EXT-X-MEDIA in the master playlist; skip the
     // embedded CEA-608/708 captions so they do not render alongside.
     enableCEA708Captions: false,
+    // Adaptive bitrate: start from a bandwidth estimate and never fetch more pixels than
+    // the player shows.
+    capLevelToPlayerSize: true,
+    abrEwmaDefaultEstimate: 2_000_000,
   });
   let dead = false;
   let recoveries = 0;
@@ -70,6 +85,11 @@ export async function attachHls(video: HTMLVideoElement, url: string, options: H
     }
     else giveUp();
   });
+  hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+    const levels = (data.levels || []).map((level, index) => ({ index, height: level.height || 0 }));
+    options.onLevels?.(levels.sort((a, b) => b.height - a.height));
+  });
+  hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => options.onLevelSwitch?.(data.level));
   hls.on(Hls.Events.LEVEL_UPDATED, (_event, data) => {
     options.onLive(!!(data && data.details && data.details.live));
   });
@@ -87,6 +107,9 @@ export async function attachHls(video: HTMLVideoElement, url: string, options: H
       });
       currentUrl = newUrl;
       hls.loadSource(newUrl);
+    },
+    setQuality(index: number) {
+      if (!dead) hls.currentLevel = index;
     },
     destroy() {
       if (dead) return;

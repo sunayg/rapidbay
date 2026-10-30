@@ -27,7 +27,7 @@ Playwright needs its browser once: `npx playwright install chromium`.
 RAPIDBAY_PORT=5050 docker compose -f docker-compose.local.yml --env-file .env --env-file .env.vpn up -d --build rapidbay
 ```
 
-`HLS_STREAMING=True` is needed for the HLS test in `real-backend.spec.ts` (it skips itself otherwise).
+The HLS test in `real-backend.spec.ts` seeds a single-rendition playlist; the adaptive ladder is checked separately (see the README).
 After changing anything in `src/`, rebuild with the command above before running `npm run e2e`.
 
 Environment: `BASE_URL` (default `http://localhost:5050`), `RAPIDBAY_CONTAINER` (default `rapidbay-rapidbay-1`).

@@ -337,14 +337,14 @@ describe("keyboard, remote and media keys", () => {
   it("controls stay while a menu is open", async () => {
     vi.useFakeTimers();
     await mountPlayer();
-    await wrapper!.find('[aria-label="Audio and subtitles"]').trigger("click");
+    await wrapper!.find('[aria-label="Quality, audio and subtitles"]').trigger("click");
     await vi.advanceTimersByTimeAsync(10000);
     expect(wrapper!.find(".player-controls").isVisible()).toBe(true);
   });
 
   it("Escape closes an open menu and returns focus to its button; otherwise it does nothing", async () => {
     await mountPlayer();
-    const opener = wrapper!.find('[aria-label="Audio and subtitles"]');
+    const opener = wrapper!.find('[aria-label="Quality, audio and subtitles"]');
     expect(press("Escape").defaultPrevented).toBe(false);
     await opener.trigger("click");
     expect(wrapper!.find(".player-tracks").exists()).toBe(true);
@@ -411,7 +411,7 @@ describe("captions", () => {
   it("the tracks menu picks a subtitle, remembers the language and can switch it off", async () => {
     const { state } = await mountPlayer();
     const { english, dutch } = addTracks(state);
-    await wrapper!.find('[aria-label="Audio and subtitles"]').trigger("click");
+    await wrapper!.find('[aria-label="Quality, audio and subtitles"]').trigger("click");
     const labels = wrapper!.findAll(".player-tracks button").map((b) => b.text());
     expect(labels).toEqual(["Original", "Off", "English", "Dutch"]);
     await wrapper!.findAll(".player-tracks button")[3].trigger("click");

@@ -19,7 +19,7 @@ import CastButton from "./CastButton.vue";
 import EpisodeMenu from "./EpisodeMenu.vue";
 import TracksMenu from "./TracksMenu.vue";
 import { cleanMediaTitle, formatClock, languageName, type EpisodeChoice } from "./media";
-import { attachHls, playSafely, type HlsHandle } from "./useHls";
+import { attachHls, playSafely, type HlsHandle, type QualityLevel } from "./useHls";
 import { useEpisodes } from "./useEpisodes";
 import { usePlayerKeys } from "./usePlayerKeys";
 import { useTextTracks } from "./useTextTracks";
@@ -159,7 +159,7 @@ function closeMenu(): void {
   const name = openMenu.value;
   openMenu.value = "";
   void nextTick(() => {
-    const label = name === "episodes" ? "Episodes" : "Audio and subtitles";
+    const label = name === "episodes" ? "Episodes" : "Quality, audio and subtitles";
     root.value?.querySelector<HTMLElement>(`[aria-label="${label}"]`)?.focus();
   });
 }
@@ -254,6 +254,14 @@ let notedWatch = false;
 let streamLive = false;
 let positionTimer: ReturnType<typeof setInterval> | undefined;
 let hls: HlsHandle | null = null;
+const qualityLevels = ref<QualityLevel[]>([]);
+const selectedQuality = ref(-1);
+const playingQuality = ref(-1);
+
+function selectQuality(index: number): void {
+  selectedQuality.value = index;
+  hls?.setQuality(index);
+}
 
 function knownDuration(): number {
   const el = video.value;
@@ -317,6 +325,8 @@ async function startSource(): Promise<void> {
           if (!disposed) emit("stream-error");
         },
         onLive: (live) => (streamLive = live),
+        onLevels: (levels) => (qualityLevels.value = levels),
+        onLevelSwitch: (index) => (playingQuality.value = index),
       });
     } catch {
       hls = null;
@@ -539,7 +549,7 @@ onBeforeUnmount(() => {
           />
         </div>
         <div class="player-pop">
-          <button type="button" class="player-btn" aria-label="Audio and subtitles" :aria-expanded="openMenu === 'tracks'" @click="toggleMenu('tracks')">
+          <button type="button" class="player-btn" aria-label="Quality, audio and subtitles" :aria-expanded="openMenu === 'tracks'" @click="toggleMenu('tracks')">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H9l-4 3v-3H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z" /><path d="M8 11h2M12 11h4M8 14h5" /></svg>
           </button>
           <TracksMenu
@@ -548,6 +558,10 @@ onBeforeUnmount(() => {
             :active-audio="tracks.activeAudio.value"
             :caption-choices="tracks.captionChoices.value"
             :active-caption="tracks.activeCaption.value"
+            :quality-levels="qualityLevels"
+            :selected-quality="selectedQuality"
+            :playing-quality="playingQuality"
+            @quality="selectQuality"
             @audio="tracks.selectAudio"
             @caption="tracks.selectCaption"
           />
