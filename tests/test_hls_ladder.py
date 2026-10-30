@@ -249,3 +249,26 @@ def test_detection_falls_back_to_the_low_power_encoder(monkeypatch):
     assert hls_ladder._vaapi_works("/dev/dri/renderD128")
     assert len(runs) == 2 and hls_ladder._vaapi_low_power
     hls_ladder.reset_encoder_cache()
+
+
+def test_gpu_decoding_is_asked_for_only_when_it_works_and_is_wanted(monkeypatch, tmp_path):
+    ladder = plan_ladder(1920, 1080, [1080, 720])
+    off = hls_ladder.build_session_args(ladder, 1080, SOFTWARE, "veryfast", 6, "/in.mkv", None, 0, "init")
+    assert "-hwaccel" not in off
+    on = hls_ladder.build_session_args(ladder, 1080, SOFTWARE, "veryfast", 6, "/in.mkv", None, 0, "init", hw_decode=True)
+    assert on[on.index("-hwaccel") + 1] == "vaapi"
+    assert on.index("-hwaccel") < on.index("-i")  # an input option
+    assert "-hwaccel_output_format" not in on  # frames come back to memory for the software encoder
+
+    device = tmp_path / "renderD128"
+    device.write_text("")
+    hls_ladder.reset_encoder_cache()
+    monkeypatch.setattr(hls_ladder, "_hw_decode_works", lambda _d: True)
+    assert hls_ladder.detect_hw_decode("auto", str(device))
+    assert not hls_ladder.detect_hw_decode("off", str(device))
+    hls_ladder.reset_encoder_cache()
+    monkeypatch.setattr(hls_ladder, "_hw_decode_works", lambda _d: False)
+    assert not hls_ladder.detect_hw_decode("auto", str(device))
+    hls_ladder.reset_encoder_cache()
+    assert not hls_ladder.detect_hw_decode("auto", str(tmp_path / "missing"))  # no GPU device at all
+    hls_ladder.reset_encoder_cache()

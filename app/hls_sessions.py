@@ -362,7 +362,7 @@ class SessionManager:
         args = hls_ladder.build_session_args(
             session.ladder, session.src_height, session.encoder, settings.HLS_X264_PRESET,
             session.segment_seconds, "pipe:0" if piped else source, self._audio_args(session), index, init_prefix, session.audio_tracks, settings.AAC_CHANNELS,
-            settings.AUDIO_DOWNMIX, settings.AUDIO_DOWNMIX_BOOST,
+            settings.AUDIO_DOWNMIX, settings.AUDIO_DOWNMIX_BOOST, hls_ladder.detect_hw_decode(settings.HLS_HWDECODE),
         )
         with open(os.path.join(session.directory, "ffmpeg.log"), "a") as stderr_log:
             session.proc = Popen(

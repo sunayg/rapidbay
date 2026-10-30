@@ -241,6 +241,7 @@ _vaapi_low_power = False
 def reset_encoder_cache() -> None:
     global _vaapi_low_power
     _encoder_cache.clear()
+    _hw_decode_cache.clear()
     _vaapi_low_power = False
 
 
@@ -265,6 +266,41 @@ def _vaapi_works(device: str) -> bool:
             _vaapi_low_power = low_power
             return True
     return False
+
+
+_hw_decode_cache: dict[str, bool] = {}
+
+
+def detect_hw_decode(preference: str, device: str = VAAPI_DEVICE) -> bool:
+    """Whether the source can be decoded on the GPU. Independent of the encoder: a chip that cannot
+    honour the ladder's bitrates in hardware can still decode, which takes the heaviest load (a 10-bit
+    HEVC file) off the CPU. `preference` is "auto" or "off". Cached for the life of the process."""
+    if preference == "off":
+        return False
+    if preference not in _hw_decode_cache:
+        _hw_decode_cache[preference] = os.path.exists(device) and _hw_decode_works(device)
+    return _hw_decode_cache[preference]
+
+
+def _hw_decode_works(device: str) -> bool:
+    """Decode a one-second clip with the output kept on the GPU: if the GPU cannot, ffmpeg fails (rather than
+    quietly decoding in software, as it does when the frames may come back to memory)."""
+    try:
+        clip = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-f", "lavfi",
+             "-i", "testsrc2=size=1280x720:rate=24:duration=1", "-c:v", "libx264", "-f", "mpegts", "pipe:1"],
+            capture_output=True, timeout=20, check=False,
+        ).stdout
+        if not clip:
+            return False
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-hwaccel", "vaapi", "-hwaccel_device", device,
+             "-hwaccel_output_format", "vaapi", "-i", "pipe:0", "-f", "null", "-"],
+            input=clip, capture_output=True, timeout=20, check=False,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
 
 
 def filter_graph(ladder: Sequence[Rendition], src_height: int, encoder: str) -> str:
@@ -362,6 +398,7 @@ def build_session_args(
     audio_channels: int = 2,
     downmix: str = "dialogue",
     downmix_boost: int = 100,
+    hw_decode: bool = False,
 ) -> List[str]:
     """ffmpeg arguments for a seekable session: read `source` by path from `start_segment`.
 
@@ -376,6 +413,9 @@ def build_session_args(
     args: List[str] = ["ffmpeg", "-nostdin", "-v", "error"]
     if encoder == VAAPI:
         args += ["-init_hw_device", f"vaapi=va:{VAAPI_DEVICE}", "-filter_hw_device", "va"]
+    if hw_decode:
+        # Frames come back to memory for the filters; a codec the GPU cannot decode falls back to software.
+        args += ["-hwaccel", "vaapi", "-hwaccel_device", VAAPI_DEVICE]
     if start > 0:
         args += ["-ss", str(start)]
     args += ["-i", source, "-sn", "-filter_complex", filter_graph(ladder, src_height, encoder)]
