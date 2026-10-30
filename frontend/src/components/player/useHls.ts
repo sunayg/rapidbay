@@ -42,6 +42,35 @@ export interface HlsOptions {
   onAudioSwitch?: (index: number) => void;
 }
 
+function debugRequested(): boolean {
+  try {
+    return window.localStorage.getItem("hlsDebug") === "1";
+  } catch {
+    return false;
+  }
+}
+
+// Segments loaded at the starting quality before the player may change it.
+const START_LEVEL_HOLD_FRAGMENTS = 3;
+// The quality to start at: the best one that needs no more than this, so a first look is quick on most links.
+const START_BITRATE = 2_500_000;
+
+// Index of the level to start on: the best whose bitrate fits START_BITRATE, else the lowest. -1 if none.
+export function startLevelFor(levels: { bitrate?: number; height?: number }[]): number {
+  if (!levels.length) return -1;
+  let best = -1;
+  levels.forEach((level, index) => {
+    const bitrate = level.bitrate || 0;
+    if (bitrate <= START_BITRATE && (best < 0 || (level.height || 0) > (levels[best].height || 0))) best = index;
+  });
+  if (best >= 0) return best;
+  let lowest = 0;
+  levels.forEach((level, index) => {
+    if ((level.bitrate || Infinity) < (levels[lowest].bitrate || Infinity)) lowest = index;
+  });
+  return lowest;
+}
+
 export function playSafely(video: HTMLVideoElement): void {
   try {
     const promise = video.play() as Promise<void> | undefined;
@@ -57,6 +86,8 @@ export async function attachHls(video: HTMLVideoElement, url: string, options: H
   const Hls = await loadHls();
   if (!Hls.isSupported()) return null;
   const hls = new Hls({
+    // localStorage.hlsDebug = "1" prints hls.js's own log to the console, for finding out why a stream is stuck.
+    debug: debugRequested(),
     // Resume through hls.js itself: setting currentTime before the manifest is
     // parsed races its own initial seek (the live edge for EVENT playlists).
     // 0 is an explicit start at the beginning.
@@ -74,6 +105,8 @@ export async function attachHls(video: HTMLVideoElement, url: string, options: H
   });
   let dead = false;
   let recoveries = 0;
+  let holdingStartLevel = false;
+  let startFragments = 0;
   const giveUp = () => {
     if (dead) return;
     dead = true;
@@ -97,7 +130,23 @@ export async function attachHls(video: HTMLVideoElement, url: string, options: H
   });
   hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
     const levels = (data.levels || []).map((level, index) => ({ index, height: level.height || 0 }));
-    options.onLevels?.(levels.sort((a, b) => b.height - a.height));
+    options.onLevels?.([...levels].sort((a, b) => b.height - a.height));
+    // The first segment of a session waits for the encoder to start, so timing it says nothing about the
+    // connection: a quality switch made on that reading leaves the player with nothing to show. Hold the
+    // starting level until a few segments are in, then let the connection decide.
+    const start = startLevelFor(data.levels || []);
+    if (start >= 0 && data.levels.length > 1) {
+      hls.startLevel = start;
+      hls.currentLevel = start;
+      holdingStartLevel = true;
+    }
+  });
+  hls.on(Hls.Events.FRAG_BUFFERED, (_event, data) => {
+    if (!holdingStartLevel || data.frag.type !== "main") return;
+    if (++startFragments >= START_LEVEL_HOLD_FRAGMENTS) {
+      holdingStartLevel = false;
+      hls.currentLevel = -1; // adaptive from here on
+    }
   });
   hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_event, data) => {
     options.onAudioTracks?.((data.audioTracks || []).map((track, index) => ({ index, label: track.name || track.lang || "Track " + (index + 1) })));

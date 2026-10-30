@@ -397,7 +397,7 @@ class SessionManager:
         parsed = parse_segment_request(name)
         if parsed is None or parsed[1] >= session.variant_count:
             return None
-        kind, _level, index = parsed
+        kind, level, index = parsed
         path = os.path.join(session.directory, name)
         session.last_request = time.monotonic()
         if kind == "seg":
@@ -413,7 +413,7 @@ class SessionManager:
         retried = False
         deadline = time.monotonic() + SEGMENT_WAIT_SECONDS
         while time.monotonic() < deadline and not cancelled():
-            if os.path.isfile(path):
+            if self._ready(session, kind, level, path):
                 return path
             proc = session.proc
             if proc is not None and proc.poll() not in (None, 0):
@@ -427,7 +427,20 @@ class SessionManager:
                 retried = True
                 self._ensure_encoding(session, index)
             time.sleep(POLL_SECONDS)
-        return path if os.path.isfile(path) else None
+        return path if self._ready(session, kind, level, path) else None
+
+    @staticmethod
+    def _ready(session: Session, kind: str, level: int, path: str) -> bool:
+        """Whether the file can be sent. An init file exists as soon as ffmpeg opens it, but its contents are
+        written later: sent early, the player gets an empty file and cannot start. Once a segment of that
+        variant exists, the init file is whole."""
+        if not os.path.isfile(path):
+            return False
+        if kind != "init":
+            return True
+        with contextlib.suppress(OSError):
+            return os.path.getsize(path) > 0 and bool(produced_indexes(session.directory, level))
+        return False
 
     # -- housekeeping ------------------------------------------------------------------------
 

@@ -54,7 +54,8 @@ const nextFilename = ref("");
 const nextMagnet = ref<string | null>(null);
 
 const controlsOn = computed(() => hovering.value || !!openMenu.value);
-const hash = computed(() => props.url.split("/")[2] || "");
+// The torrent of the file being played (its play URL carries it only for a plain /play/ link).
+const hash = computed(() => get_hash(props.magnet));
 const showCast = computed(() => !!props.supported && !!props.url && isDesktop && isChrome);
 const fileLink = computed(() => window.location.origin + props.url.split("?")[0]);
 const displayTitle = computed(() => cleanMediaTitle(props.filename));

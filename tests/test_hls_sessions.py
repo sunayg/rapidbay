@@ -266,3 +266,40 @@ def test_the_start_point_is_seconds_of_this_files_own_video():
     assert _start_threshold_bytes(80 * mib, None, 20) == 20 * mib
     # Tiny files still get a floor of 1 mib.
     assert _start_threshold_bytes(2 * mib, 10.0, 20) == 1 * mib
+
+
+def test_an_init_file_is_not_sent_while_ffmpeg_is_still_writing_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(hs, "SEGMENT_WAIT_SECONDS", 0.4)
+    manager = hs.SessionManager(str(tmp_path))
+    session = _session(directory=str(tmp_path))
+    session.runs = 1
+    monkeypatch.setattr(manager, "_ensure_encoding", lambda s, i: None)
+    init = tmp_path / "init_v0.mp4"
+    init.write_bytes(b"")  # ffmpeg has opened it and has not written yet
+    assert manager.file_for(session, "init_v0.mp4") is None
+    init.write_bytes(b"ftyp-moov")  # written, but no segment of the variant yet: still not trusted
+    assert manager.file_for(session, "init_v0.mp4") is None
+    (tmp_path / hs.segment_name(0, 0)).write_bytes(b"x")  # the first segment is out, so the init file is whole
+    assert manager.file_for(session, "init_v0.mp4") == str(init)
+
+
+def test_an_init_file_waits_for_a_segment_of_its_own_variant(tmp_path, monkeypatch):
+    monkeypatch.setattr(hs, "SEGMENT_WAIT_SECONDS", 0.3)
+    manager = hs.SessionManager(str(tmp_path))
+    session = _session(directory=str(tmp_path))
+    session.runs = 1
+    monkeypatch.setattr(manager, "_ensure_encoding", lambda s, i: None)
+    (tmp_path / "init_v1.mp4").write_bytes(b"moov")
+    (tmp_path / hs.segment_name(0, 0)).write_bytes(b"x")  # another variant's segment does not count
+    assert manager.file_for(session, "init_v1.mp4") is None
+    (tmp_path / hs.segment_name(1, 0)).write_bytes(b"x")
+    assert manager.file_for(session, "init_v1.mp4") == str(tmp_path / "init_v1.mp4")
+
+
+def test_segments_are_sent_as_soon_as_they_exist(tmp_path, monkeypatch):
+    manager = hs.SessionManager(str(tmp_path))
+    session = _session(directory=str(tmp_path))
+    session.runs = 1
+    monkeypatch.setattr(manager, "_ensure_encoding", lambda s, i: None)
+    (tmp_path / hs.segment_name(0, 0)).write_bytes(b"x")
+    assert manager.file_for(session, hs.segment_name(0, 0)) == str(tmp_path / hs.segment_name(0, 0))

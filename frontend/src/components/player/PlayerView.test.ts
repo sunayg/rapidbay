@@ -381,6 +381,15 @@ describe("keyboard, remote and media keys", () => {
   });
 });
 
+describe("playing from an encode session", () => {
+  it("looks up the next file under the torrent's own hash, not the one in the stream URL", async () => {
+    await mountPlayer({ url: "/api/hls/0123456789abcdef0123456789abcdef/master.m3u8" });
+    const lookups = fetched.map((f) => f.url).filter((u) => u.startsWith("/api/next_file/"));
+    expect(lookups.length).toBeGreaterThan(0);
+    expect(lookups.every((u) => u.startsWith(`/api/next_file/${HASH}/`))).toBe(true);
+  });
+});
+
 describe("seek bar feedback", () => {
   function fakeBuffered(video: HTMLVideoElement, ranges: [number, number][]) {
     Object.defineProperty(video, "buffered", {
