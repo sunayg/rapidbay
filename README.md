@@ -150,3 +150,7 @@ docker-compose up
 -   For Real Debrid, set the env variable RD_TOKEN to the one on https://real-debrid.com/apitoken
 -   For TorBox, set the env variable TB_TOKEN to your API key from https://torbox.app/settings
 -   If both are set, Real Debrid is tried first and TorBox is used as a fallback
+
+## Responsible use
+
+RapidBay is a general-purpose, self-hosted torrent client and media player. It ships with no content and no list of sources. You are responsible for what you search for, download and stream, and for following the copyright laws and other rules that apply where you live. Only use it for content you have the right to access, such as public-domain, openly licensed or your own media.
