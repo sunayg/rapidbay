@@ -85,15 +85,15 @@ test("torrent link converts to a magnet and lands on the file list", async ({ pa
   expect(new URL(page.url()).pathname).toBe(magnetUrl().replace(/\/$/, ""));
 });
 
-test("download shows progress, offers play when streamable, and cancel goes back", async ({ page }) => {
+test("download shows progress, starts playback by itself when streamable, and cancel goes back", async ({ page }) => {
   const file = FILES[0];
   const state = { current: { status: "downloading", progress: 0.2, peers: 5, download_rate: 2_000_000 } as Record<string, unknown> };
   await mockFiles(page, FILES);
   await mockDownload(page, file, state);
-  let streamPosts = 0;
-  await page.route(`**/api/magnet/${HASH}/${encodeURIComponent(file)}/stream`, (route) => {
-    streamPosts++;
-    return route.fulfill({ json: { started: true } });
+  let sessionPosts = 0;
+  await page.route(`**/api/magnet/${HASH}/${encodeURIComponent(file)}/session*`, (route) => {
+    sessionPosts++;
+    return route.fulfill({ json: { url: null, reason: "unsupported_format" } });
   });
   let cancelBody: string | null = null;
   await page.route(`**/api/magnet/${HASH}/${encodeURIComponent(file)}/cancel`, (route) => {
@@ -106,14 +106,13 @@ test("download shows progress, offers play when streamable, and cancel goes back
   await expect(page.locator('[data-screen="download-screen"]')).toBeVisible();
   await expect(page.locator(".spinner-heading")).toHaveText("downloading (20%)");
   await expect(page.locator(".spinner-sub")).toHaveText("5 Peers · 2.00 MB/s");
-  await expect(page.locator(".stream-btn")).toHaveCount(0);
+  expect(sessionPosts).toBe(0); // not enough of the file yet
 
   state.current = { status: "downloading", progress: 0.6, peers: 8, can_stream: true };
   await expect(page.locator(".spinner-heading")).toHaveText("downloading (60%)", { timeout: 5000 });
-  await expect(page.locator(".stream-btn")).toBeVisible();
-  await page.locator(".stream-btn").click();
-  await expect.poll(() => streamPosts).toBe(1);
-  await expect(page.locator(".stream-btn")).toHaveCount(0);
+  // No button to press: it asks for a session itself, and says why when it cannot play yet.
+  await expect.poll(() => sessionPosts).toBe(1);
+  await expect(page.locator(".stream-message")).toContainText("once it has finished");
 
   await page.locator(".cancel-download").click();
   await expect.poll(() => cancelBody).toBe("POST");
@@ -122,7 +121,7 @@ test("download shows progress, offers play when streamable, and cancel goes back
 
 test("a ready file hands over to the player with the MP4 link", async ({ page }) => {
   const file = FILES[0];
-  const state = { current: { status: "ready", progress: 1, filename: "Some.Show.S01E01.mp4", supported: true } as Record<string, unknown> };
+  const state = { current: { status: "ready", progress: 1, filename: "Some.Show.S01E01.mp4", supported: true, playback: "direct" } as Record<string, unknown> };
   await mockDownload(page, file, state);
   await page.goto(magnetUrl(file));
   await expect(page.locator('[data-screen="player-screen"]')).toBeVisible();
@@ -145,7 +144,7 @@ test("screenshots", async ({ page }) => {
   test.skip(!process.env.SHOTS, "set SHOTS to a directory");
   const dir = process.env.SHOTS as string;
   await mockFiles(page, FILES, { [FILES[1]]: "downloaded", [FILES[2]]: "downloading" });
-  const state = { current: { status: "downloading", progress: 0.42, peers: 12, download_rate: 3_400_000, can_stream: true } as Record<string, unknown> };
+  const state = { current: { status: "downloading", progress: 0.42, peers: 12, download_rate: 3_400_000 } as Record<string, unknown> };
   await mockDownload(page, FILES[0], state);
   for (const [name, size] of [["desktop", { width: 1280, height: 800 }], ["phone", { width: 390, height: 780 }]] as const) {
     await page.setViewportSize(size);
@@ -153,7 +152,7 @@ test("screenshots", async ({ page }) => {
     await expect(page.locator(".file-row")).toHaveCount(3);
     await page.screenshot({ path: `${dir}/filelist-${name}.png` });
     await page.goto(magnetUrl(FILES[0]));
-    await expect(page.locator(".stream-btn")).toBeVisible();
+    await expect(page.locator(".cancel-download")).toBeVisible();
     await page.screenshot({ path: `${dir}/download-${name}.png` });
   }
 });

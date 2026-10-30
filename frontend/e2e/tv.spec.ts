@@ -49,7 +49,7 @@ async function mockStack(page: Page): Promise<void> {
     route.fulfill({ status: 200, contentType: "text/event-stream", body: sse([{ files: FILES, file_statuses: {}, done: true }]) }),
   );
   await page.route(`**/api/magnet/${HASH}/${encodeURIComponent(FILES[0])}`, (route) =>
-    route.fulfill({ json: { status: "ready", progress: 1, filename: "sample.mp4", supported: true, subtitles: [] } }),
+    route.fulfill({ json: { status: "ready", progress: 1, filename: "sample.mp4", supported: true, playback: "direct", subtitles: [] } }),
   );
   await page.route("**/api/next_file/**", (route) => route.fulfill({ json: { next_filename: null, next_magnet: null } }));
   await page.route("**/play/**", async (route: Route) => {
@@ -235,10 +235,10 @@ test("the home rows are walked with the D-pad: nothing loses the focus or leaves
   expect(await focused(page)).toMatch(/^input/);
 });
 
-test("a download in progress can be streamed, left and cancelled with the remote", async ({ page }) => {
+test("a download in progress can be left and cancelled with the remote", async ({ page }) => {
   await mockStack(page);
   await page.route(`**/api/magnet/${HASH}/${encodeURIComponent(FILES[0])}`, (route) =>
-    route.fulfill({ json: { status: "downloading", progress: 0.3, peers: 4, can_stream: true } }),
+    route.fulfill({ json: { status: "downloading", progress: 0.3, peers: 4 } }),
   );
   let cancelled = false;
   await page.route(`**/api/magnet/${HASH}/${encodeURIComponent(FILES[0])}/cancel`, (route) => {

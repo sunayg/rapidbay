@@ -69,8 +69,8 @@ async function mock(page: Page, info: Info): Promise<{ current: Info }> {
   return holder;
 }
 
-const READY = { status: "ready", progress: 1, filename: "sample.mp4", supported: true, subtitles: [] };
-const DOWNLOADING = { status: "downloading", progress: 0.3, peers: 4, can_stream: true };
+const READY = { status: "ready", progress: 1, filename: "sample.mp4", supported: true, playback: "direct", subtitles: [] };
+const DOWNLOADING = { status: "downloading", progress: 0.3, peers: 4 };
 
 interface Screen {
   name: string;

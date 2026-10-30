@@ -8,14 +8,13 @@ import { expect, test, type Page } from "@playwright/test";
 // The REAL backend, no torrent. A finished download is just files on disk, so the
 // spec writes them into the running container the way the daemon would:
 //   FILELIST_DIR/<hash>            JSON list of the torrent's files   (-> file list)
-//   OUTPUT_DIR/<hash>/<stem>.mp4   the converted file                 (-> status "ready")
-//   OUTPUT_DIR/<hash>/<stem>.m3u8  the HLS media playlist + init/segments
-//                                  (-> hls_filename, written into a master playlist by the backend)
-// Everything the UI calls (file list, status, SSE, /play/, next_file, master playlist) is the real
-// FastAPI app. Not covered: HLSStreamer/ffmpeg segmenting and libtorrent, which need a live torrent.
+//   OUTPUT_DIR/<hash>/<file>       the finished download, as the daemon links it (-> status "ready")
+// Everything the UI calls (file list, status, SSE, encode sessions, next_file) is the real FastAPI
+// app and the real ffmpeg. Not covered: libtorrent, and a session over a file that is still
+// downloading, which need a live torrent.
 //
-// Media are the small VP9/Opus fixtures (Playwright's Chromium has no H.264). Nothing on these
-// paths transcodes, so the backend does not care about the codec.
+// The media is a small VP9/Opus fixture; the session re-encodes it to H.264, which the Chromium
+// bundled with Playwright cannot play, so that spec runs in an installed Google Chrome.
 //
 // Skipped when the stack or its container is not reachable. Override the container with
 // RAPIDBAY_CONTAINER (default: rapidbay-rapidbay-1).
@@ -24,15 +23,13 @@ const BASE = process.env.BASE_URL || "http://localhost:5050";
 const FIXTURES = fileURLToPath(new URL("./fixtures", import.meta.url));
 
 const READY_HASH = "e2e0000000000000000000000000000000000001";
-const HLS_HASH = "e2e0000000000000000000000000000000000002";
-const HASHES = [READY_HASH, HLS_HASH];
+const HASHES = [READY_HASH];
 const magnetFor = (hash: string, name: string) => `magnet:?xt=urn:btih:${hash.toUpperCase()}&dn=${name}`;
 // No SxxEyy in the names: the last file of a pack would otherwise make next_file run a real indexer search.
 const ONE = "RapidBay.E2E.Part.One.mkv";
 const TWO = "RapidBay.E2E.Part.Two.mkv";
 const stem = (file: string) => file.replace(/\.mkv$/, "");
 const READY_MAGNET = magnetFor(READY_HASH, "RapidBay.E2E");
-const HLS_MAGNET = magnetFor(HLS_HASH, "RapidBay.E2E.Hls");
 const url = (magnet: string, file?: string) => `/magnet/${encodeURIComponent(encodeURIComponent(magnet))}/${file ? encodeURIComponent(file) : ""}`;
 
 let reachable = false;
@@ -86,26 +83,12 @@ test.beforeAll(async () => {
   // (mkv names holding MP4 data: not browser-direct-playable by name, so they go through an encode session)
   put(join(FIXTURES, "sample.mp4"), READY_HASH, ONE);
   put(join(FIXTURES, "sample.mp4"), READY_HASH, TWO);
-  // Pack 2: file one has only an HLS playlist so far (a live stream); no mp4, no torrent.
-  const live = readHlsPlaylist();
-  const playlist = join(staging, `${stem(ONE)}.m3u8`);
-  writeFileSync(playlist, live);
-  put(playlist, HLS_HASH, `${stem(ONE)}.m3u8`);
-  put(join(FIXTURES, "hls", "init.mp4"), HLS_HASH, "init.mp4");
-  for (let i = 0; i < 5; i++) put(join(FIXTURES, "hls", `seg${i}.m4s`), HLS_HASH, `seg${i}.m4s`);
 });
 
 test.afterAll(() => {
   if (!reachable) return;
   cleanup();
 });
-
-function readHlsPlaylist(): string {
-  // Still converting: no end marker, so the playlist looks live.
-  return readFileSync(join(FIXTURES, "hls", "master.m3u8"), "utf8")
-    .replace("#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-PLAYLIST-TYPE:EVENT")
-    .replace("#EXT-X-ENDLIST", "");
-}
 
 test.beforeEach(async ({ page }) => {
   test.skip(!reachable, `RapidBay stack/container not reachable at ${BASE} (${CONTAINER})`);
@@ -185,40 +168,9 @@ test("real next_file: the player knows the following file of the pack", async ({
   expect(next).toEqual({ next_filename: TWO, next_magnet: null });
 });
 
-test("real HLS: plays the backend's master playlist and stays on it when the MP4 appears", async ({ page, request }) => {
-  test.setTimeout(60_000);
-  const status = await (await request.get(`/api/magnet/${HLS_HASH}/${encodeURIComponent(ONE)}`)).json();
-  expect(status.hls_filename, JSON.stringify(status)).toBeTruthy();
-  // The backend wrapped our media playlist in a master playlist of its own.
-  expect(status.hls_filename).toBe(`${stem(ONE)}_master.m3u8`);
-  const master = await (await request.get(`/play/${HLS_HASH}/${status.hls_filename}`)).text();
-  expect(master).toContain("#EXT-X-STREAM-INF");
-  expect(master).toContain(`${stem(ONE)}.m3u8`);
-
-  const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto(url(HLS_MAGNET, ONE));
-  await expect(page.locator('[data-screen="player-screen"]')).toBeVisible();
-  await playing(page, 1.5);
-  let s = await stat(page);
-  expect(s.src).toMatch(/^blob:/); // hls.js through MediaSource, from the real segments
-  expect(s.width).toBe(192);
-
-  // The conversion "finishes": the mp4 appears (atomically, as the converter's rename does).
-  docker("cp", join(FIXTURES, "sample.mp4"), `${CONTAINER}:${outputDir}/${HLS_HASH}/.${stem(ONE)}.mp4.tmp`);
-  s = await stat(page);
-  inContainer("mv", `${outputDir}/${HLS_HASH}/.${stem(ONE)}.mp4.tmp`, `${outputDir}/${HLS_HASH}/${stem(ONE)}.mp4`);
-  // The player is not handed over: it stays on the stream and keeps playing.
-  await playing(page, s.t + 2);
-  const after = await stat(page);
-  expect(after.src).toMatch(/^blob:/);
-  expect(after.t).toBeGreaterThan(s.t);
-  expect(errors).toEqual([]);
-});
-
 test("the test data is gone from the container and nothing reached the torrent session", async ({ request }) => {
   const status = await (await request.get("/api/status")).json();
-  for (const key of ["session_torrents", "torrent_downloads", "subtitle_downloads", "conversions", "hls_streams"]) {
+  for (const key of ["session_torrents", "torrent_downloads", "subtitle_downloads"]) {
     expect(JSON.stringify(status[key]), key).not.toContain("e2e00000");
   }
   cleanup();

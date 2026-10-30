@@ -17,7 +17,7 @@ const FIXTURES = fileURLToPath(new URL("./fixtures", import.meta.url));
 const VTT = (text: string) => `WEBVTT\n\n00:00:00.000 --> 00:00:09.000\n${text}\n`;
 
 type Info = Record<string, unknown>;
-const READY: Info = { status: "ready", progress: 1, filename: "sample.mp4", supported: true, subtitles: ["sample_eng.vtt", "sample_nld.vtt"] };
+const READY: Info = { status: "ready", progress: 1, filename: "sample.mp4", supported: true, playback: "direct", subtitles: ["sample_eng.vtt", "sample_nld.vtt"] };
 
 async function serveBytes(route: Route, path: string, type: string): Promise<void> {
   const body = readFileSync(path);
@@ -65,13 +65,18 @@ async function mockStack(page: Page, info: Info): Promise<Mocks> {
     if (path === "sample.mp4") return serveBytes(route, join(FIXTURES, "sample.mp4"), "video/mp4");
     if (path === "sample_eng.vtt") return route.fulfill({ contentType: "text/vtt", body: VTT("Hello captions") });
     if (path === "sample_nld.vtt") return route.fulfill({ contentType: "text/vtt", body: VTT("Hallo ondertitels") });
-    if (path === "hls/master.m3u8") {
+    return route.fulfill({ status: 404, body: "" });
+  });
+  // An encode session: the whole file listed up front, as the backend serves it.
+  await page.route(`**/api/magnet/${HASH}/${encodeURIComponent(FILE)}/session*`, (route) =>
+    route.fulfill({ json: { url: "/api/hls/mock/master.m3u8" } }),
+  );
+  await page.route("**/api/hls/mock/**", async (route) => {
+    const path = decodeURIComponent(new URL(route.request().url()).pathname).replace("/api/hls/mock/", "");
+    mocks.played.push(path);
+    if (path === "master.m3u8") {
       if (mocks.hlsManifestStatus.current !== 200) return route.fulfill({ status: mocks.hlsManifestStatus.current, body: "nope" });
-      // Still converting: no end marker, so the playlist looks live.
-      const playlist = readFileSync(join(FIXTURES, "hls", "master.m3u8"), "utf8")
-        .replace("#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-PLAYLIST-TYPE:EVENT")
-        .replace("#EXT-X-ENDLIST", "");
-      return route.fulfill({ contentType: "application/vnd.apple.mpegurl", body: playlist });
+      return route.fulfill({ contentType: "application/vnd.apple.mpegurl", body: readFileSync(join(FIXTURES, "hls", "master.m3u8"), "utf8") });
     }
     if (path === "init.mp4") return serveBytes(route, join(FIXTURES, "hls", "init.mp4"), "video/mp4");
     if (/^seg\d+\.m4s$/.test(path)) return serveBytes(route, join(FIXTURES, "hls", path), "video/iso.segment");
@@ -169,10 +174,10 @@ test("the position is resumed, and saved when leaving", async ({ page }) => {
   expect(saved.duration).toBeGreaterThan(9);
 });
 
-test("HLS plays through hls.js while downloading and stays on the stream once the file is ready", async ({ page }) => {
+test("an encode session plays through hls.js while downloading and stays on it once the file is ready", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  const mocks = await mockStack(page, { status: "downloading", progress: 0.4, hls_filename: "hls/master.m3u8", hls_subtitles: [], peers: 3 });
+  const mocks = await mockStack(page, { status: "downloading", progress: 0.4, can_stream: true, peers: 3 });
   await page.goto(magnetUrl(FILE));
   await expect(page.locator('[data-screen="player-screen"]')).toBeVisible();
   await playing(page, 2.5);
@@ -184,7 +189,7 @@ test("HLS plays through hls.js while downloading and stays on the stream once th
   expect(await page.evaluate(() => localStorage.getItem("completedFiles"))).toBeNull();
 
   s = await stat(page);
-  mocks.info.current = { ...READY, hls_filename: "hls/master.m3u8" };
+  mocks.info.current = { ...READY, playback: "session" };
   // No handover: the player keeps the adaptive stream (and its quality levels) and keeps playing.
   await playing(page, s.t + 2);
   const after = await stat(page);
@@ -196,7 +201,7 @@ test("HLS plays through hls.js while downloading and stays on the stream once th
 
 test("a stream that cannot be played drops back to the progress view", async ({ page }) => {
   test.setTimeout(60_000);
-  const mocks = await mockStack(page, { status: "downloading", progress: 0.2, hls_filename: "hls/master.m3u8", hls_subtitles: [], can_stream: false });
+  const mocks = await mockStack(page, { status: "downloading", progress: 0.2, can_stream: true });
   mocks.hlsManifestStatus.current = 500;
   await page.goto(magnetUrl(FILE));
   await expect(page.locator('[data-screen="player-screen"]')).toBeVisible();
