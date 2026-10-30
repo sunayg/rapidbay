@@ -149,6 +149,7 @@ onBeforeUnmount(() => {
           autocapitalize="none"
           placeholder="Search"
           aria-label="Search"
+          data-exit-right
         />
       </form>
       <nav class="home-nav" aria-label="Shortcuts">

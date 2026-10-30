@@ -288,10 +288,13 @@ export function handleKeydown(e: KeyboardEvent): void {
 
   // In a text field, Backspace edits and left/right move the caret; up and
   // down still leave the field.
-  // Right at the end of the text is the exception, so the remote can reach the
-  // header buttons beside the search box.
+  // A field marked data-exit-right lets ArrowRight leave once the caret is at
+  // the end of the text, so the remote can reach the buttons beside it.
   const atEnd =
-    active instanceof HTMLInputElement && active.selectionStart === active.value.length && active.selectionEnd === active.value.length;
+    active instanceof HTMLInputElement &&
+    active.dataset.exitRight !== undefined &&
+    active.selectionStart === active.value.length &&
+    active.selectionEnd === active.value.length;
   if (typing && (lower === "backspace" || direction === "left" || (direction === "right" && !atEnd))) return;
 
   if (isSelectKey(e)) {

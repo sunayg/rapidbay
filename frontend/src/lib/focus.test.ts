@@ -179,6 +179,34 @@ describe("focus handling in the DOM", () => {
     expect(document.activeElement).not.toBe(input);
   });
 
+  it("ArrowRight at the end of a plain text field keeps the caret there", () => {
+    installFocus();
+    const input = document.getElementById("i") as HTMLInputElement;
+    input.value = "abc";
+    input.focus();
+    input.setSelectionRange(3, 3);
+    place(buttons[1], 300, 200); // a neighbour to the right
+    const right = key({ key: "ArrowRight" });
+    input.dispatchEvent(right);
+    expect(right.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("a data-exit-right field lets ArrowRight leave only from the end of the text", () => {
+    installFocus();
+    const input = document.getElementById("i") as HTMLInputElement;
+    input.dataset.exitRight = "";
+    input.value = "abc";
+    place(buttons[1], 300, 200);
+    input.focus();
+    input.setSelectionRange(1, 1);
+    input.dispatchEvent(key({ key: "ArrowRight" }));
+    expect(document.activeElement).toBe(input);
+    input.setSelectionRange(3, 3);
+    input.dispatchEvent(key({ key: "ArrowRight" }));
+    expect(document.activeElement).toBe(buttons[1]);
+  });
+
   it("gives media keys to the registered handler first", () => {
     installFocus();
     const seen: string[] = [];
