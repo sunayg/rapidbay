@@ -59,7 +59,7 @@ describe("HomeScreen rows", () => {
     mockData();
     const { wrapper } = await visit();
     const headings = wrapper.findAll(".home-row-heading").map((h) => h.text());
-    expect(headings).toEqual(["Keep watching", "Recently watched", "Top 10 series trending", "Top 10 movies trending"]);
+    expect(headings).toEqual(["Keep watching", "Recently watched", "Trending series this week", "Trending movies this week"]);
     expect(wrapper.findAll(".billboard-card")).toHaveLength(3);
     expect(wrapper.findAll(".poster-card")).toHaveLength(3);
     expect(wrapper.findAll(".rank-svg")).toHaveLength(3);
@@ -184,7 +184,7 @@ describe("HomeScreen navigation", () => {
 
   it.each([
     ["History", "/search/[history]"],
-    ["Community Searches", "/search/"],
+    ["Latest releases", "/search/"],
     ["Favorites", "/search/[favorites]"],
     ["Settings", "/settings"],
   ])("the %s shortcut goes to %s", async (label, path) => {

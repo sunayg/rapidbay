@@ -178,6 +178,10 @@ class TMDBClient:
         """Fetch details for a movie by its TMDB ID."""
         return self._get_json(f"/movie/{movie_id}")
 
+    def get_trending(self, media_type: str) -> dict[str, Any] | None:
+        """Fetch this week's worldwide trending titles for "tv" or "movie"."""
+        return self._get_json(f"/trending/{media_type}/week")
+
     def get_image_url(self, path: str | None, size: str = "w185") -> str | None:
         """Build a TMDB image URL, or return None for an absent path."""
         if not path:

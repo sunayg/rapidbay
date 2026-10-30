@@ -21,7 +21,7 @@ from result_grouping import (
     year_from_details,
 )
 from title_parser import parse_title
-from tmdb import TMDBClient, failure_count
+from tmdb import TMDBClient, failure_count, tmdb_disk_cache
 
 # A title TMDB confirmed it cannot match is looked up again after this long.
 _UNMATCHED_RETRY_MS = 24 * 60 * 60 * 1000
@@ -755,13 +755,50 @@ def watch_rows(events: list[dict[str, Any]]) -> dict[str, Any]:
     return present_watch_rows(list(titles.values()))
 
 
+def _worldwide_trending(client: TMDBClient, media_type: str, limit: int = 10) -> list[dict[str, Any]]:
+    """This week's worldwide TMDB trending titles, without adult entries."""
+    data = client.get_trending(media_type)
+    cards: list[dict[str, Any]] = []
+    for entry in (data or {}).get("results", []):
+        tmdb_id = _as_int(entry.get("id"))
+        title = entry.get("name") if media_type == "tv" else entry.get("title")
+        if tmdb_id is None or not title or entry.get("adult"):
+            continue
+        released = str(entry.get("first_air_date" if media_type == "tv" else "release_date") or "")
+        cards.append({
+            "tmdb_id": tmdb_id,
+            "media_type": media_type,
+            "title": title,
+            "year": _as_int(released[:4]),
+            "poster_url": client.get_image_url(entry.get("poster_path"), size="w185"),
+            "backdrop_url": client.get_image_url(entry.get("backdrop_path"), size="w780"),
+            "subtitle": None,
+            "rank": len(cards) + 1,
+        })
+        if len(cards) == limit:
+            break
+    return cards
+
+
+def _trending_chart(client: TMDBClient | None, media_type: str) -> list[dict[str, Any]]:
+    """Worldwide trending from TMDB; this server's own chart when TMDB is unavailable."""
+    if client is not None:
+        try:
+            cards = _worldwide_trending(client, media_type)
+        except Exception:
+            cards = []
+        if cards:
+            return cards
+    return stats.top(media_type)
+
+
 def home() -> dict[str, Any]:
-    """Trending series and movie charts. Personal rows stay in the browser."""
-    client = TMDBClient(settings.TMDB_API_KEY) if settings.TMDB_API_KEY else None
+    """Top 10 trending series and movies. Personal rows stay in the browser."""
+    client = TMDBClient(settings.TMDB_API_KEY, tmdb_disk_cache()) if settings.TMDB_API_KEY else None
     if client is not None:
         _classify_adult_activity(client)
-    series = stats.top("tv")
-    movies = stats.top("movie")
+    series = _trending_chart(client, "tv")
+    movies = _trending_chart(client, "movie")
     if client is not None:
         _annotate_next_air(series, client, {}, caught_up_only=False)
     return {"keep_watching": [], "recent": [], "series": series, "movies": movies}

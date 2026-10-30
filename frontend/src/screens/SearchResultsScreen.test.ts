@@ -292,7 +292,7 @@ describe("plain search", () => {
   it("shows community searches for an empty term", async () => {
     const { wrapper } = await visit("/search/");
     expect(FakeEventSource.last("/api/rich_search_events/").url).toBe("/api/rich_search_events/");
-    expect(wrapper.find(".results-heading").text()).toBe("Community Searches");
+    expect(wrapper.find(".results-heading").text()).toBe("Latest releases");
     FakeEventSource.last("/api/rich_search_events/").emit({ groups: [], other: [magnetRes("Trending thing")], done: true });
     await flushPromises();
     expect(text(wrapper)).toContain("Trending thing");

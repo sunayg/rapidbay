@@ -15,7 +15,7 @@ services:
             SERVER_COUNTRIES: ${SERVER_COUNTRIES:-Netherlands}
         ports:
             - "9696:9696" # Prowlarr UI (shares gluetun's network)
-            - "${RAPIDBAY_PORT:-5000}:5000" # RapidBay UI (shares gluetun's network)
+            - "${RAPIDBAY_PORT:-5050}:5000" # RapidBay UI (shares gluetun's network)
         restart: unless-stopped
 
     prowlarr:

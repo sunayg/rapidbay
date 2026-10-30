@@ -190,7 +190,7 @@ def test_next_air_date_follows_catch_up_on_recent_and_any_upcoming_on_the_chart(
     }
 
     class FakeClient:
-        def __init__(self, _key: str) -> None:
+        def __init__(self, _key: str, _cache: object = None) -> None:
             return None
 
         def get_tv_details(self, tv_id: int) -> dict:
@@ -499,3 +499,58 @@ def test_successful_event_is_not_retried() -> None:
 
     process.assert_called_once()
     timer.assert_not_called()
+
+
+def test_home_charts_use_worldwide_trending_and_skip_adult():
+    from app.library import home
+
+    class FakeClient:
+        def __init__(self, _key: str, _cache: object = None) -> None:
+            return None
+
+        def get_trending(self, media_type: str) -> dict:
+            if media_type == "tv":
+                return {"results": [
+                    {"id": 1, "name": "Big Show", "first_air_date": "2026-03-01", "poster_path": "/p.jpg"},
+                    {"id": 2, "name": "Adult Show", "adult": True},
+                ]}
+            return {"results": [{"id": 7, "title": "Big Film", "release_date": "2025-12-25"}]}
+
+        def get_image_url(self, path: str | None, size: str = "w185") -> str | None:
+            return f"img{size}{path}" if path else None
+
+        def get_tv_details(self, tv_id: int) -> dict | None:
+            return None
+
+    with patch("app.library.settings.TMDB_API_KEY", "key"), \
+            patch("app.library.stats.top", side_effect=AssertionError("local chart must not be used")), \
+            patch("app.library._classify_adult_activity"), \
+            patch("app.library.TMDBClient", FakeClient):
+        payload = home()
+
+    assert [c["title"] for c in payload["series"]] == ["Big Show"]
+    assert payload["series"][0]["year"] == 2026 and payload["series"][0]["rank"] == 1
+    assert payload["series"][0]["poster_url"] == "imgw185/p.jpg"
+    assert [(c["title"], c["year"]) for c in payload["movies"]] == [("Big Film", 2025)]
+
+
+def test_home_charts_fall_back_to_local_chart_when_tmdb_has_nothing():
+    from app.library import home
+
+    class FakeClient:
+        def __init__(self, _key: str, _cache: object = None) -> None:
+            return None
+
+        def get_trending(self, media_type: str) -> None:
+            return None
+
+        def get_tv_details(self, tv_id: int) -> dict | None:
+            return None
+
+    local = [{"tmdb_id": 3, "media_type": "tv", "title": "Local", "rank": 1}]
+    with patch("app.library.settings.TMDB_API_KEY", "key"), \
+            patch("app.library.stats.top", side_effect=lambda m: local if m == "tv" else []), \
+            patch("app.library._classify_adult_activity"), \
+            patch("app.library.TMDBClient", FakeClient):
+        payload = home()
+    assert payload["series"] == local and payload["movies"] == []

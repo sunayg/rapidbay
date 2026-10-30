@@ -53,7 +53,7 @@ const heading = computed(() => {
   if (pinned.value) return "";
   if (isHistory.value) return "History";
   if (isFavorites.value) return "Favorites";
-  return searchterm.value ? "" : "Community Searches";
+  return searchterm.value ? "" : "Latest releases";
 });
 const emptyMessage = computed(() => {
   if (isHistory.value) return "Nothing in your history yet.";

@@ -14,10 +14,10 @@ test("home shows rows, shortcuts and takes remote-style keyboard focus", async (
 
   await expect(page.locator('[data-screen="search-screen"]')).toBeVisible();
   await expect(page.locator("input.form-control")).toBeFocused();
-  await expect(page.locator(".home-shortcut")).toHaveText(["History", "Community Searches", "Favorites", "Settings"]);
+  await expect(page.locator(".home-shortcut")).toHaveText(["History", "Latest releases", "Favorites", "Settings"]);
 
   if ((home.series ?? []).length) {
-    await expect(page.getByRole("heading", { name: "Top 10 series trending" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Trending series this week" })).toBeVisible();
     await expect(page.locator(".poster-card").first()).toBeVisible();
     // Down from the search box lands on the first row, then walks down to the shortcuts.
     await page.keyboard.press("ArrowDown");

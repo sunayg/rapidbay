@@ -176,10 +176,10 @@ onBeforeUnmount(() => {
             @select="openTitle"
           />
         </HomeRail>
-        <HomeRail v-if="topSeries.length" heading="Top 10 series trending" scroller-class="poster-scroller">
+        <HomeRail v-if="topSeries.length" heading="Trending series this week" scroller-class="poster-scroller">
           <PosterCard v-for="title in topSeries" :key="'series-' + title.tmdb_id" :title="title" show-next @select="openTitle" />
         </HomeRail>
-        <HomeRail v-if="topMovies.length" heading="Top 10 movies trending" scroller-class="poster-scroller">
+        <HomeRail v-if="topMovies.length" heading="Trending movies this week" scroller-class="poster-scroller">
           <PosterCard v-for="title in topMovies" :key="'movie-' + title.tmdb_id" :title="title" @select="openTitle" />
         </HomeRail>
         <HomeRail v-if="library.searchHistory.length" heading="Recent searches">
@@ -204,7 +204,7 @@ onBeforeUnmount(() => {
           </button>
           <button type="button" class="home-shortcut" @click="goTrending">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8M15 7h6v6" /></svg>
-            <span>Community Searches</span>
+            <span>Latest releases</span>
           </button>
           <button type="button" class="home-shortcut" @click="goFavorites">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 6C19 16.5 12 21 12 21z" /></svg>
