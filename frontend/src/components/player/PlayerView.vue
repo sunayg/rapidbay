@@ -39,7 +39,6 @@ const router = useRouter();
 
 const HIDE_AFTER_MS = 2800;
 const POSITION_SAVE_MS = 5000;
-const isDesktop = !/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|mobile|CriOS/i.test(navigator.userAgent);
 const isChrome = /Chrome/i.test(navigator.userAgent);
 
 const video = ref<HTMLVideoElement | null>(null);
@@ -56,7 +55,7 @@ const nextMagnet = ref<string | null>(null);
 const controlsOn = computed(() => hovering.value || !!openMenu.value);
 // The torrent of the file being played (its play URL carries it only for a plain /play/ link).
 const hash = computed(() => get_hash(props.magnet));
-const showCast = computed(() => !!props.supported && !!props.url && isDesktop && isChrome);
+const showCast = computed(() => !!props.supported && !!props.url && isChrome);
 const fileLink = computed(() => window.location.origin + props.url.split("?")[0]);
 const displayTitle = computed(() => cleanMediaTitle(props.filename));
 const statusLabel = computed(() => {
@@ -138,6 +137,22 @@ function playPause(wanted?: "play" | "pause"): void {
   if (!el) return;
   if (wanted === "play" || (wanted !== "pause" && el.paused)) playSafely(el);
   else el.pause();
+}
+
+// A tap on a touch screen shows or hides the controls (play and pause are on the
+// controls); only a mouse click on the picture toggles playback.
+let tapFoundControlsHidden = false;
+function onVideoTouchStart(): void {
+  tapFoundControlsHidden = !controlsOn.value;
+}
+function onVideoClick(event: MouseEvent): void {
+  if ((event as PointerEvent).pointerType !== "touch") return togglePlay();
+  if (tapFoundControlsHidden || openMenu.value) {
+    openMenu.value = "";
+    return;
+  }
+  clearTimeout(hideTimer);
+  hovering.value = false;
 }
 
 function togglePlay(): void {
@@ -494,7 +509,8 @@ onBeforeUnmount(() => {
       playsinline
       tabindex="0"
       :aria-label="displayTitle || 'Video'"
-      @click="togglePlay"
+      @touchstart.passive="onVideoTouchStart"
+      @click="onVideoClick"
       @play="onPlay"
       @pause="onPause"
       @timeupdate="onTimeUpdate"

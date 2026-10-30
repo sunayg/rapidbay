@@ -676,18 +676,39 @@ describe("cleanup", () => {
   });
 });
 
+describe("tapping the picture", () => {
+  it("only toggles the controls on a touch screen, and pauses on a mouse click", async () => {
+    const { video } = await mountPlayer();
+    const play = vi.spyOn(video, "play").mockResolvedValue();
+    const pause = vi.spyOn(video, "pause").mockImplementation(() => {});
+    const el = wrapper!.find("video");
+    const tap = async () => {
+      await new Promise((r) => setTimeout(r, 120)); // reveal() ignores events closer than 100 ms
+      await el.trigger("touchstart");
+      await el.trigger("click", { pointerType: "touch" });
+    };
+    expect(wrapper!.find(".player-controls").isVisible()).toBe(true);
+    await tap();
+    expect(wrapper!.find(".player-controls").isVisible()).toBe(false);
+    await tap();
+    expect(wrapper!.find(".player-controls").isVisible()).toBe(true);
+    expect(play).not.toHaveBeenCalled();
+    expect(pause).not.toHaveBeenCalled();
+  });
+});
+
 describe("chromecast button", () => {
   const chromeUa = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 
-  it("is hidden outside desktop Chrome", async () => {
+  it("is hidden outside Chrome", async () => {
     await mountPlayer();
     expect(wrapper!.find(".chromecast-btn").exists()).toBe(false);
   });
 
-  it("is hidden on a phone even in Chrome", async () => {
+  it("is offered on an Android phone in Chrome", async () => {
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue(chromeUa + " Mobile");
     await mountPlayer();
-    expect(wrapper!.find(".chromecast-btn").exists()).toBe(false);
+    expect(wrapper!.find(".chromecast-btn").exists()).toBe(true);
   });
 
   it("is hidden for a file that cannot be played", async () => {
