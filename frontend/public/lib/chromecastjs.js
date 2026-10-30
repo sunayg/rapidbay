@@ -215,7 +215,17 @@ var ChromecastJS = function(scope, reciever) {
             return
         }
         var mediaInfo = new chrome.cast.media.MediaInfo(that.Media.content)
-        //mediaInfo.contentType = 'video/mp4' ??
+        // Without a content type the receiver cannot tell an HLS playlist from a file and refuses to play it.
+        if (that.Media.contentType) {
+            mediaInfo.contentType = that.Media.contentType
+            if (/mpegurl/i.test(that.Media.contentType)) {
+                // Our segments are fragmented MP4; the receiver assumes MPEG-TS unless told.
+                var formats = chrome.cast.media.HlsSegmentFormat
+                var videoFormats = chrome.cast.media.HlsVideoSegmentFormat
+                mediaInfo.hlsSegmentFormat = (formats && formats.FMP4) || 'fmp4'
+                mediaInfo.hlsVideoSegmentFormat = (videoFormats && videoFormats.FMP4) || 'fmp4'
+            }
+        }
         mediaInfo.metadata = new chrome.cast.media.GenericMediaMetadata()
         // The sexy subtitle support function <3
         if (that.Media.subtitles.length > 0) {

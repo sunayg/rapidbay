@@ -12,6 +12,7 @@ export interface CastSubtitle {
 }
 export interface CastMedia {
   content: string;
+  contentType: string;
   title: string;
   subtitles: CastSubtitle[];
   time: number;
@@ -21,6 +22,7 @@ export interface CastMedia {
 }
 export interface ChromecastLike {
   cast(media: CastMedia, done: (problem: unknown) => void): void;
+  on?(event: string, callback: (detail: unknown) => void): void;
 }
 export type CastLoader = () => Promise<ChromecastLike | null>;
 
@@ -118,6 +120,7 @@ export async function castVideo(request: CastRequest): Promise<string | null> {
     cc.cast(
       {
         content: session ? prefix + "session/" + session[1] + "/master.m3u8" : (castUrl(request.videoUrl) as string),
+        contentType: session ? "application/x-mpegURL" : "video/mp4",
         title: request.title || "RapidBay",
         subtitles,
         time: video.currentTime || 0,

@@ -17,6 +17,8 @@ let alive = true;
 onMounted(async () => {
   cc = await props.loader().catch(() => null);
   if (alive) available.value = !!cc;
+  // The TV refusing the video (unreachable address, unsupported stream) arrives here, after cast() has returned.
+  cc?.on?.("error", (detail) => alive && showError(String(detail)));
 });
 onBeforeUnmount(() => {
   alive = false;
