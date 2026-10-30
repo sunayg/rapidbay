@@ -115,12 +115,15 @@ async function openSession(ready: boolean): Promise<void> {
   if (sessionRequested) return;
   sessionRequested = true;
   streamMessage.value = null;
+  // The viewer may move to another file while this request is out: its answer belongs to the old one.
+  const file = magnet.value + "\n" + filename.value;
+  const stale = () => !alive || file !== magnet.value + "\n" + filename.value;
   try {
     const start = getVideoPosition(magnet.value, filename.value);
     const data = await post<{ url?: string | null; reason?: string }>(
       "/api/magnet/" + hash.value + "/" + encodeURIComponent(filename.value) + "/session?start=" + Math.floor(start),
     );
-    if (!alive) return;
+    if (stale()) return;
     if (data && data.url) {
       playLink.value = data.url;
       supported.value = true;
@@ -132,12 +135,14 @@ async function openSession(ready: boolean): Promise<void> {
       failed.value = streamDeclinedMessage(reason);
     } else {
       streamMessage.value = streamDeclinedMessage(reason);
-      // Not ready or at capacity: try again in a moment. Other reasons will not change.
-      if (reason === "not_ready" || reason === "capacity") routeTimeout(() => (sessionRequested = false), 5000);
+      // Not ready or at capacity: try again in a moment. Other reasons will not change. A plain timer:
+      // routeTimeout would cancel the status polling timer, which also keeps one pending.
+      if (reason === "not_ready" || reason === "capacity") setTimeout(() => !stale() && (sessionRequested = false), 5000);
     }
   } catch {
+    if (stale()) return;
     sessionRequested = false;
-    if (alive) failed.value = "Lost contact with the server.";
+    failed.value = "Lost contact with the server.";
   }
 }
 

@@ -45,7 +45,7 @@ function stubFetch(): void {
         .sort((a, b) => b.length - a.length)
         .find((prefix) => url.startsWith(prefix));
       if (!key) return new Response("{}", { status: 500 });
-      const body = handlers[key](url, init);
+      const body = await handlers[key](url, init);
       if (body instanceof Response) return body;
       return new Response(JSON.stringify(body), { status: 200 });
     }),
@@ -411,6 +411,39 @@ describe("download screen", () => {
     source.emit(info({ can_stream: true }));
     await flushPromises();
     expect(wrapper.findComponent({ name: "PlayerHost" }).props("url")).toBe("/api/hls/abc123/master.m3u8");
+    vi.useRealTimers();
+  });
+
+  it("ignores a session that comes back after the viewer has moved on to another file", async () => {
+    let answer: (value: unknown) => void = () => {};
+    handlers[SESSION] = () => new Promise((resolve) => (answer = resolve));
+    const { wrapper, router } = await download();
+    FakeEventSource.last("/api/magnet_events/").emit(info({ can_stream: true }));
+    await flushPromises();
+    expect(posts(SESSION)).toHaveLength(1); // the request is out
+    await router.push(downloadPath("Show.S01E02.mkv")); // the viewer picks another episode
+    await flushPromises();
+    answer({ url: "/api/hls/old-session/master.m3u8" }); // and the first answer arrives late
+    await flushPromises();
+    const host = wrapper.findComponent({ name: "PlayerHost" });
+    expect(host.exists() && host.props("url")).not.toBe("/api/hls/old-session/master.m3u8");
+  });
+
+  it("keeps polling while a session is being retried", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let polls = 0;
+    handlers[`/api/magnet/${HASH}/Show.S01E01.mkv`] = () => {
+      polls++;
+      return info({ can_stream: true });
+    };
+    handlers[SESSION] = () => ({ url: null, reason: "capacity" }); // asked again after 5 s
+    await download();
+    FakeEventSource.last("/api/magnet_events/").fail(); // the event stream is gone: status comes from polling
+    await flushPromises();
+    const before = polls;
+    await vi.advanceTimersByTimeAsync(7000);
+    await flushPromises();
+    expect(polls - before).toBeGreaterThanOrEqual(4); // one a second, not stopped by the retry timer
     vi.useRealTimers();
   });
 
