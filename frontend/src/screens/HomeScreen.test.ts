@@ -231,13 +231,12 @@ describe("HomeScreen remote and keyboard focus", () => {
     box(wrapper.find(".home-rows").element, 0, 60, 1000, 800);
     const sections = wrapper.findAll(".home-row");
     sections.forEach((s, i) => box(s.element, 0, 100 + i * 200, 1000, 180));
-    box(wrapper.find(".home-shortcuts").element, 0, 100 + sections.length * 200, 1000, 80);
     const place = (el: Element, x: number, rowTop: number) => box(el, x, rowTop + 20, 100, 100);
     wrapper.findAll(".billboard-card").forEach((c, i) => place(c.element, 40 + (i % 2) * 120, i < 2 ? 100 : 300));
     wrapper.findAll(".poster-card").forEach((c, i) => place(c.element, 40 + i * 120, i < 2 ? 500 : 700));
     box(wrapper.find(".search-chip").element, 40, 920, 80, 36);
     box(wrapper.find(".search-history-clear").element, 40, 980, 120, 30);
-    wrapper.findAll(".home-shortcut").forEach((b, i) => box(b.element, 40 + i * 120, 1080, 100, 60));
+    wrapper.findAll(".home-shortcut").forEach((b, i) => box(b.element, 400 + i * 120, 10, 100, 40));
 
     const active = () => document.activeElement as HTMLElement;
     // The search box is focused on load.
@@ -261,12 +260,7 @@ describe("HomeScreen remote and keyboard focus", () => {
     expect(active().className).toContain("search-chip");
     press("ArrowDown");
     expect(active().className).toContain("search-history-clear");
-    press("ArrowDown");
-    expect(active().textContent).toContain("History");
-    press("ArrowRight");
-    press("ArrowRight");
-    expect(active().textContent).toContain("Favorites");
-    press("ArrowUp");
+    press("ArrowDown"); // nothing below the last row: stays put
     expect(active().className).toContain("search-history-clear");
 
     // Enter on a focused card clicks it.
@@ -284,10 +278,27 @@ describe("HomeScreen remote and keyboard focus", () => {
     const { wrapper } = await visit();
     const input = wrapper.find("input.form-control").element as HTMLInputElement;
     box(input, 20, 10, 300, 40);
-    wrapper.findAll(".billboard-card").forEach((c, i) => box(c.element, 400 + i * 10, 10, 100, 40));
+    wrapper.findAll(".home-shortcut").forEach((b, i) => box(b.element, 400 + i * 120, 10, 100, 40));
     expect(document.activeElement).toBe(input);
+    input.value = "dune";
+    input.setSelectionRange(1, 1);
     press("ArrowRight");
     expect(document.activeElement).toBe(input);
+  });
+
+  it("right at the end of the search text moves to the header buttons", async () => {
+    mockData();
+    const { wrapper } = await visit();
+    const input = wrapper.find("input.form-control").element as HTMLInputElement;
+    box(input, 20, 10, 300, 40);
+    wrapper.findAll(".home-shortcut").forEach((b, i) => box(b.element, 400 + i * 120, 10, 100, 40));
+    input.value = "dune";
+    input.setSelectionRange(4, 4);
+    press("ArrowRight");
+    expect((document.activeElement as HTMLElement).textContent).toContain("History");
+    press("ArrowRight");
+    press("ArrowRight");
+    expect((document.activeElement as HTMLElement).textContent).toContain("Favorites");
   });
 
   it("does not grab the search box on the TV UI", async () => {

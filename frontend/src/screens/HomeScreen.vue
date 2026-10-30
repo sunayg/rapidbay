@@ -151,6 +151,24 @@ onBeforeUnmount(() => {
           aria-label="Search"
         />
       </form>
+      <nav class="home-nav" aria-label="Shortcuts">
+        <button type="button" class="home-shortcut" @click="goHistory">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2" /></svg>
+          <span>History</span>
+        </button>
+        <button type="button" class="home-shortcut" @click="goTrending">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8M15 7h6v6" /></svg>
+          <span>Latest releases</span>
+        </button>
+        <button type="button" class="home-shortcut" @click="goFavorites">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 6C19 16.5 12 21 12 21z" /></svg>
+          <span>Favorites</span>
+        </button>
+        <button type="button" class="home-shortcut" @click="goSettings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" /></svg>
+          <span>Settings</span>
+        </button>
+      </nav>
     </header>
     <main class="home-stage">
       <h1 class="sr-only">RapidBay</h1>
@@ -196,25 +214,6 @@ onBeforeUnmount(() => {
             <button type="button" class="search-history-clear" @click="clearSearchHistory">Clear search history</button>
           </template>
         </HomeRail>
-
-        <nav class="home-shortcuts" aria-label="Shortcuts">
-          <button type="button" class="home-shortcut" @click="goHistory">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5M12 7v5l3 2" /></svg>
-            <span>History</span>
-          </button>
-          <button type="button" class="home-shortcut" @click="goTrending">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8M15 7h6v6" /></svg>
-            <span>Latest releases</span>
-          </button>
-          <button type="button" class="home-shortcut" @click="goFavorites">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 6C19 16.5 12 21 12 21z" /></svg>
-            <span>Favorites</span>
-          </button>
-          <button type="button" class="home-shortcut" @click="goSettings">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" /></svg>
-            <span>Settings</span>
-          </button>
-        </nav>
       </div>
     </main>
   </div>
@@ -269,20 +268,12 @@ onBeforeUnmount(() => {
 }
 .search-history-clear:hover, .search-history-clear:focus-visible { color: var(--text); outline: 2px solid var(--focus); outline-offset: 2px; }
 
-.home-shortcuts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4) var(--space-6);
-  margin-top: var(--space-3);
-  padding: var(--space-4) var(--gutter) var(--space-3);
-}
+.home-nav { display: flex; flex: 0 0 auto; align-items: center; gap: var(--space-2); }
 .home-shortcut {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: var(--space-2);
-  min-width: 72px;
-  padding: 0;
+  padding: 8px 10px;
   color: var(--text-dim);
   font: inherit;
   font-size: 0.875rem;
@@ -291,14 +282,21 @@ onBeforeUnmount(() => {
   border: 0;
   cursor: pointer;
 }
-.home-shortcut svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.home-shortcut:hover, .home-shortcut:focus-visible { color: var(--text); outline: 2px solid var(--focus); outline-offset: 8px; border-radius: var(--radius); }
+.home-shortcut svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.home-shortcut:hover, .home-shortcut:focus-visible { color: var(--text); outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius); }
 
 /* On Google TV and Android TV only the home rows shrink; the header stays full size. */
 html.tv-ui .home-stage { display: block; flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
 html.tv-ui .home-rows { position: absolute; top: 0; left: 0; width: 142.857%; height: 142.857%; transform: scale(0.7); transform-origin: 0 0; }
 
-@media (max-width: 480px) {
-  .home-shortcuts { gap: var(--space-4) var(--space-5); }
+/* Narrow screens keep the icons and drop the labels (they stay as accessible names). */
+@media (max-width: 900px) {
+  .home-shortcut span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .home-shortcut { padding: 8px; }
+}
+@media (max-width: 560px) {
+  .topbar:has(.home-nav) { flex-wrap: wrap; }
+  .topbar:has(.home-nav) .home-search { order: 3; flex: 1 0 100%; max-width: none; margin: 0; }
+  .home-nav { margin-left: auto; }
 }
 </style>

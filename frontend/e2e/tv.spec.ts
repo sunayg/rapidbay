@@ -185,7 +185,8 @@ test("the settings screen can be reached and left with the remote", async ({ pag
   await mockStack(page);
   await page.goto("/");
   await page.locator(".home-shortcut", { hasText: "Settings" }).waitFor();
-  for (let i = 0; i < 10 && !(await focused(page)).includes("home-shortcut"); i++) await press(page, "ArrowDown");
+  await press(page, "ArrowDown");
+  for (let i = 0; i < 10 && !(await focused(page)).includes("home-shortcut"); i++) await press(page, "ArrowUp");
   for (let i = 0; i < 5; i++) {
     if ((await page.evaluate(() => document.activeElement?.textContent ?? "")).trim() === "Settings") break;
     await press(page, "ArrowRight");

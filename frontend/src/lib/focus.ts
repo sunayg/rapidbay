@@ -288,7 +288,11 @@ export function handleKeydown(e: KeyboardEvent): void {
 
   // In a text field, Backspace edits and left/right move the caret; up and
   // down still leave the field.
-  if (typing && (lower === "backspace" || direction === "left" || direction === "right")) return;
+  // Right at the end of the text is the exception, so the remote can reach the
+  // header buttons beside the search box.
+  const atEnd =
+    active instanceof HTMLInputElement && active.selectionStart === active.value.length && active.selectionEnd === active.value.length;
+  if (typing && (lower === "backspace" || direction === "left" || (direction === "right" && !atEnd))) return;
 
   if (isSelectKey(e)) {
     if (active && active.tagName === "INPUT") return;

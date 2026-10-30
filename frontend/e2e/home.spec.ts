@@ -19,18 +19,19 @@ test("home shows rows, shortcuts and takes remote-style keyboard focus", async (
   if ((home.series ?? []).length) {
     await expect(page.getByRole("heading", { name: "Trending series this week" })).toBeVisible();
     await expect(page.locator(".poster-card").first()).toBeVisible();
-    // Down from the search box lands on the first row, then walks down to the shortcuts.
+    // Down from the search box lands on the first row.
     await page.keyboard.press("ArrowDown");
     await expect(page.locator(".poster-card").first()).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    // The header buttons sit beside the search box: right from the empty box reaches them.
+    await page.locator("input.form-control").focus();
     const activeClass = () => page.evaluate(() => document.activeElement?.className ?? "");
-    for (let i = 0; i < 8 && !(await activeClass()).includes("home-shortcut"); i++) await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowRight");
     expect(await activeClass()).toContain("home-shortcut");
     const before = await page.evaluate(() => document.activeElement?.textContent);
     await page.keyboard.press("ArrowRight");
     expect(await page.evaluate(() => document.activeElement?.textContent)).not.toBe(before);
     expect(await activeClass()).toContain("home-shortcut");
-    await page.keyboard.press("ArrowUp");
-    expect(await activeClass()).toContain("poster-card");
   } else {
     await expect(page.locator(".home-empty")).toBeVisible();
   }
