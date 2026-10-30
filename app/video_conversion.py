@@ -175,6 +175,26 @@ def hls_playlists_ready(m3u8_path: str) -> bool:
     return os.path.isfile(m3u8_path)
 
 
+def hls_stream_complete(m3u8_path: str) -> bool:
+    """True when the stream on disk is whole: a finished ladder, or a finished single playlist."""
+    if hls_ladder_complete(m3u8_path):
+        return True
+    try:
+        with open(m3u8_path) as f:
+            return "#EXT-X-ENDLIST" in f.read()
+    except OSError:
+        return False
+
+
+def discard_stream_playlists(m3u8_path: str) -> None:
+    """Remove a stream's playlists. An event playlist without ENDLIST hangs players that load it later."""
+    for playlist in [m3u8_path, *variant_playlist_paths(m3u8_path)]:
+        with contextlib.suppress(OSError):
+            os.remove(playlist)
+    with contextlib.suppress(OSError):
+        os.remove(ladder_info_path(m3u8_path))
+
+
 def hls_ladder_complete(m3u8_path: str) -> bool:
     """True when every rendition playlist is finished (ENDLIST), i.e. the whole file has been encoded."""
     variants = variant_playlist_paths(m3u8_path)
@@ -978,11 +998,7 @@ class HLSStreamer:
                     self.mark_failed(m3u8_path)
                 # Drop the partial m3u8 either way: an event playlist without
                 # ENDLIST will hang players that try to play it later.
-                for playlist in [m3u8_path, *variant_playlist_paths(m3u8_path)]:
-                    with contextlib.suppress(OSError):
-                        os.remove(playlist)
-                with contextlib.suppress(OSError):
-                    os.remove(ladder_info_path(m3u8_path))
+                discard_stream_playlists(m3u8_path)
                 return
 
             # Finalize the playlists: switch EVENT→VOD and append ENDLIST

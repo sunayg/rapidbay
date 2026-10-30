@@ -486,7 +486,7 @@ class RapidBayDaemon:
             **hls_info,
         }
 
-    def start_hls_stream(self, magnet_hash: str, filename: str) -> Dict[str, Any]:
+    def start_hls_stream(self, magnet_hash: str, filename: str, auto: bool = False) -> Dict[str, Any]:
         """Start HLS streaming for a file.
 
         Returns a dict with:
@@ -494,6 +494,9 @@ class RapidBayDaemon:
           - reason: str (only when started=False) — one of disabled,
             unsupported_format, invalid_path, no_torrent, file_not_found,
             not_ready, capacity, codec_failed
+
+        `auto` is the daemon starting the encode for a finished download, with no viewer
+        asking: such a stream is never reaped for lack of viewers.
         """
         # Reject malformed magnet hashes upfront. The hash is interpolated into
         # filesystem paths (output_dir, download_root); restricting to the
@@ -515,8 +518,13 @@ class RapidBayDaemon:
         # so filename can't traverse — this is the catch-all.
         if not _is_safe_subpath(settings.OUTPUT_DIR, m3u8):
             return {"started": False, "reason": "invalid_path"}
-        if video_conversion.hls_playlists_ready(m3u8) or m3u8 in self.hls_streamer.active_streams:
-            return {"started": True}  # Already streaming or complete
+        if m3u8 in self.hls_streamer.active_streams:
+            return {"started": True}  # Already streaming
+        if video_conversion.hls_playlists_ready(m3u8):
+            if video_conversion.hls_stream_complete(m3u8):
+                return {"started": True}  # Already complete
+            # Playlists with no encoder behind them (the daemon restarted mid-encode): start over.
+            video_conversion.discard_stream_playlists(m3u8)
         if self.hls_streamer.is_failed(m3u8):
             return {"started": False, "reason": "codec_failed"}
         h = self.torrent_client.torrents.get(magnet_hash)
@@ -556,6 +564,8 @@ class RapidBayDaemon:
         poll_key = (magnet_hash, filename)
 
         def is_abandoned() -> bool:
+            if auto:
+                return False
             last = self._file_poll_times.get(poll_key, started_at)
             return time.monotonic() - last > settings.HLS_VIEWER_TIMEOUT
 
@@ -596,6 +606,35 @@ class RapidBayDaemon:
             return True
         # moov-at-end MP4: streamable via the faststart remux.
         return video_conversion.mp4_remux_layout(filepath, available) is not None
+
+    def _advance_conversion(self, magnet_hash: str, filename: str, filepath: str, output_filepath: str) -> str:
+        """One heartbeat step for a downloaded video that has no MP4 yet. Returns what it did:
+        "encoding" (already running or just started), "waiting" (no free stream slot),
+        "remux" (encode finished, publishing the MP4), "converter" (old full conversion for a
+        file the streaming encode cannot take) or "missing" (the file is not on disk).
+
+        The streaming encode is the converter: it starts here without a viewer, so whoever
+        opens the file later joins an encode that is already under way.
+        """
+        m3u8 = _m3u8_path(magnet_hash, filename)
+        if m3u8 in self.hls_streamer.active_streams:
+            return "encoding"
+        if video_conversion.hls_ladder_complete(m3u8):
+            variants = video_conversion.variant_playlist_paths(m3u8)
+            os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
+            self.video_converter.remux_hls_to_mp4(variants[0], output_filepath)
+            return "remux"
+        if not os.path.isfile(filepath):
+            log.debug(f"File not found for conversion, skipping: {filepath}")
+            return "missing"
+        started = self.start_hls_stream(magnet_hash, filename, auto=True)
+        if started.get("started"):
+            return "encoding"
+        if started.get("reason") == "capacity":
+            return "waiting"
+        os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
+        self.video_converter.convert_file(filepath, output_filepath)
+        return "converter"
 
     def _get_available_bytes(self, magnet_hash: str, filename: str) -> int:
         """Contiguous bytes available from the start of the file for pipe
@@ -745,19 +784,7 @@ class RapidBayDaemon:
                 embedded_subtitle_languages = [lang for (_, lang) in video_conversion.get_sub_tracks(filepath)]
                 self._download_external_subtitles(filepath, output_dir, skip=available_subtitle_languages + embedded_subtitle_languages)
             elif is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
-                m3u8 = _m3u8_path(magnet_hash, filename)
-                if m3u8 in self.hls_streamer.active_streams:
-                    continue  # a viewer is streaming it: the MP4 is made from that encode, not a second one
-                if video_conversion.hls_ladder_complete(m3u8):
-                    variants = video_conversion.variant_playlist_paths(m3u8)
-                    os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
-                    self.video_converter.remux_hls_to_mp4(variants[0], output_filepath)
-                    continue
-                if not os.path.isfile(filepath):
-                    log.debug(f"File not found for conversion, skipping: {filepath}")
-                    continue
-                os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
-                self.video_converter.convert_file(filepath, output_filepath)
+                self._advance_conversion(magnet_hash, filename, filepath, output_filepath)
             elif is_state(filename, FileStatus.READY_TO_COPY) or is_state(
                 filename, FileStatus.CONVERSION_FAILED
             ):

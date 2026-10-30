@@ -62,3 +62,23 @@ def test_master_playlist_is_rewritten_when_the_ladder_changes(tmp_path):
     vc.write_ladder_info(str(tmp_path / "stream.m3u8"), "stream", True, hls_ladder.plan_ladder(1280, 720, [720, 480, 360]))
     second = (tmp_path / vc.write_hls_master_playlist(str(tmp_path), "stream.m3u8", [])).read_text()
     assert second.count("#EXT-X-STREAM-INF") == 3 and first != second
+
+
+def test_stream_complete_covers_ladders_and_single_playlists(tmp_path):
+    assert vc.hls_stream_complete(_write_stream(tmp_path, [True, True]))
+    assert not vc.hls_stream_complete(_write_stream(tmp_path, [True, False]))
+    single = tmp_path / "single.m3u8"
+    assert not vc.hls_stream_complete(str(single))
+    single.write_text("#EXTM3U\n#EXTINF:6,\nx.m4s\n")
+    assert not vc.hls_stream_complete(str(single))
+    single.write_text("#EXTM3U\n#EXTINF:6,\nx.m4s\n#EXT-X-ENDLIST\n")
+    assert vc.hls_stream_complete(str(single))
+
+
+def test_discarding_a_partial_stream_removes_every_playlist_and_the_sidecar(tmp_path):
+    m3u8 = _write_stream(tmp_path, [False, False])
+    (tmp_path / "stream.m3u8").write_text("#EXTM3U\n")
+    vc.discard_stream_playlists(m3u8)
+    assert sorted(p.name for p in tmp_path.iterdir()) == []
+    assert not vc.hls_playlists_ready(m3u8)
+    vc.discard_stream_playlists(m3u8)  # already gone: no error
