@@ -418,6 +418,41 @@ describe("download screen", () => {
     expect(host.props("supported")).toBe(false);
   });
 
+  it("opens an encode session for a finished file the browser cannot play directly, resuming where it left off", async () => {
+    localStorage.setItem(libraryModule.getVideoPositionKey(MAGNET, "Show.S01E01.mkv"), JSON.stringify({ position: 612.8, duration: 3000, ts: Date.now() }));
+    handlers[`/api/magnet/${HASH}/Show.S01E01.mkv/session`] = () => ({ url: "/api/hls/abc123/master.m3u8" });
+    const { wrapper } = await download();
+    FakeEventSource.last("/api/magnet_events/").emit(info({ status: "ready", filename: "Show.S01E01.mkv", supported: true, playback: "session" }));
+    await flushPromises();
+    const call = posts(`/api/magnet/${HASH}/Show.S01E01.mkv/session`);
+    expect(call).toHaveLength(1);
+    expect(call[0].url).toContain("?start=612");
+    const host = wrapper.findComponent({ name: "PlayerHost" });
+    expect(host.props("url")).toBe("/api/hls/abc123/master.m3u8");
+    expect(host.props("supported")).toBe(true);
+    // A later status push does not open a second session or swap the link.
+    FakeEventSource.last("/api/magnet_events/").emit(info({ status: "ready", filename: "Show.S01E01.mkv", supported: true, playback: "session" }));
+    await flushPromises();
+    expect(posts(`/api/magnet/${HASH}/Show.S01E01.mkv/session`)).toHaveLength(1);
+  });
+
+  it("says so when the server has no room for another encode session", async () => {
+    handlers[`/api/magnet/${HASH}/Show.S01E01.mkv/session`] = () => ({ url: null, reason: "capacity" });
+    const { wrapper } = await download();
+    FakeEventSource.last("/api/magnet_events/").emit(info({ status: "ready", filename: "Show.S01E01.mkv", supported: true, playback: "session" }));
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "PlayerHost" }).exists()).toBe(false);
+    expect(text(wrapper)).toContain("Too many videos are playing");
+  });
+
+  it("plays a browser-friendly MP4 directly, with no session", async () => {
+    const { wrapper } = await download();
+    FakeEventSource.last("/api/magnet_events/").emit(info({ status: "ready", filename: "x.mp4", supported: true, playback: "direct" }));
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "PlayerHost" }).props("url")).toBe(`/play/${HASH}/x.mp4`);
+    expect(posts("/api/magnet/")).toHaveLength(0);
+  });
+
   it("falls back to the progress view when HLS playback fails, and does not retry HLS", async () => {
     const { wrapper } = await download();
     const source = FakeEventSource.last("/api/magnet_events/");

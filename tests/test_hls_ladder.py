@@ -124,3 +124,32 @@ def test_encoder_detection_prefers_software_unless_vaapi_really_works(monkeypatc
     hls_ladder.reset_encoder_cache()
     assert hls_ladder.detect_encoder("auto", str(tmp_path / "missing")) == SOFTWARE
     hls_ladder.reset_encoder_cache()
+
+
+def test_a_single_rendition_names_its_init_file_without_a_placeholder():
+    # ffmpeg leaves %v in the init file name untouched when there is only one rendition.
+    one = plan_ladder(320, 240, HEIGHTS)
+    args = build_ffmpeg_args(one, 240, SOFTWARE, "veryfast", 6, "s", None)
+    assert args[args.index("-hls_fmp4_init_filename") + 1] == "s_v0_init.mp4"
+    session = hls_ladder.build_session_args(one, 240, SOFTWARE, "veryfast", 6, "/in.mkv", None, 0, "init")
+    assert session[session.index("-hls_fmp4_init_filename") + 1] == "init_v0.mp4"
+    many = plan_ladder(1920, 1080, HEIGHTS)
+    session = hls_ladder.build_session_args(many, 1080, SOFTWARE, "veryfast", 6, "/in.mkv", None, 0, "init")
+    assert session[session.index("-hls_fmp4_init_filename") + 1] == "init_v%v.mp4"
+
+
+def test_session_args_restart_at_a_segment_on_the_same_timeline():
+    ladder = plan_ladder(1920, 1080, HEIGHTS)
+    args = build_session_args_for_test(ladder, start=7)
+    assert args[args.index("-ss") + 1] == "42"
+    assert args[args.index("-output_ts_offset") + 1] == "42"
+    assert args[args.index("-start_number") + 1] == "7"
+    assert args.index("-ss") < args.index("-i")  # input seeking, so it is fast
+    assert "temp_file" in args[args.index("-hls_flags") + 1]  # a segment is never visible half-written
+    assert args[args.index("-i") + 1] == "/in.mkv"
+    fresh = build_session_args_for_test(ladder, start=0)
+    assert "-ss" not in fresh and "-output_ts_offset" not in fresh
+
+
+def build_session_args_for_test(ladder, start):
+    return hls_ladder.build_session_args(ladder, 1080, SOFTWARE, "veryfast", 6, "/in.mkv", ["-c:a", "aac"], start, "init")

@@ -22,7 +22,7 @@ import {
   type FileInfo,
   type SubtitleTrack,
 } from "../lib/download";
-import { reportLibraryEvents, saveToHistory } from "../lib/library";
+import { getVideoPosition, reportLibraryEvents, saveToHistory } from "../lib/library";
 import { navigateBack } from "../lib/nav";
 import { decodeMagnetParam, get_hash, get_magnet_name, magnetPath } from "../lib/magnet";
 
@@ -79,14 +79,20 @@ function applyFileInfo(data: FileInfo): void {
   // MP4 is for files that were converted without a stream.
   if (data.hls_filename && !hlsFailed.value) {
     const link = hlsLink(hash.value, data.hls_filename, (data.hls_subtitles || []).length);
-    if (!playLink.value || isHlsLink(playLink.value)) {
+    // Never swap an encode session for an older stream of the same file.
+    if (!playLink.value || (isHlsLink(playLink.value) && !playLink.value.startsWith("/api/hls/"))) {
       if (playLink.value !== link) playLink.value = link;
       supported.value = true;
     }
   } else if (data.status === "ready" && data.filename) {
-    const link = mp4Link(hash.value, data.filename);
-    if (playLink.value !== link) playLink.value = link;
-    supported.value = !!data.supported;
+    if (data.playback === "session") {
+      // Nothing to link yet: ask the server for an encode session, resuming where the viewer left off.
+      if (!playLink.value) void openSession();
+    } else {
+      const link = mp4Link(hash.value, data.filename);
+      if (playLink.value !== link) playLink.value = link;
+      supported.value = !!data.supported;
+    }
   }
   downloadProgress.value = data.status !== "ready" ? data.progress || null : null;
 
@@ -120,6 +126,30 @@ function poll(): void {
 }
 
 // ---- actions -----------------------------------------------------------------------
+
+let sessionRequested = false;
+
+async function openSession(): Promise<void> {
+  if (sessionRequested) return;
+  sessionRequested = true;
+  try {
+    const start = getVideoPosition(magnet.value, filename.value);
+    const data = await post<{ url?: string | null; reason?: string }>(
+      "/api/magnet/" + hash.value + "/" + encodeURIComponent(filename.value) + "/session?start=" + Math.floor(start),
+    );
+    if (!alive) return;
+    if (data && data.url) {
+      playLink.value = data.url;
+      supported.value = true;
+    } else {
+      sessionRequested = false;
+      failed.value = data && data.reason === "capacity" ? "Too many videos are playing. Try again in a minute." : "Could not start playback.";
+    }
+  } catch {
+    sessionRequested = false;
+    if (alive) failed.value = "Lost contact with the server.";
+  }
+}
 
 async function startStream(): Promise<void> {
   streamRequested.value = true;

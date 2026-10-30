@@ -15,6 +15,8 @@ export interface FileInfo {
   hls_pending?: boolean;
   subtitles?: string[];
   can_stream?: boolean;
+  // "direct": the browser plays the file as it is. "session": it is encoded on demand.
+  playback?: "direct" | "session";
   done?: boolean;
 }
 

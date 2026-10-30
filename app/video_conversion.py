@@ -175,6 +175,27 @@ def hls_playlists_ready(m3u8_path: str) -> bool:
     return os.path.isfile(m3u8_path)
 
 
+def audio_codecs(filepath: str) -> List[str] | None:
+    """Codec names of the audio streams, or None when ffprobe could not read the file."""
+    return _ffprobe_stream_codecs(filepath, "a")
+
+
+def first_audio_format(filepath: str) -> str:
+    """MediaInfo's name for the first audio track ("" when there is none or it cannot be read)."""
+    return _detect_audio_codec(filepath)
+
+
+def is_direct_playable(filepath: str) -> bool:
+    """True when a browser can play the file as it is: an MP4 with H.264 video and AAC (or no) audio."""
+    if os.path.splitext(filepath)[1].lower() != ".mp4":
+        return False
+    video = _ffprobe_stream_codecs(filepath, "v")
+    audio = _ffprobe_stream_codecs(filepath, "a")
+    if not video or audio is None:
+        return False
+    return all(c == "h264" for c in video) and all(c == "aac" for c in audio)
+
+
 def hls_stream_complete(m3u8_path: str) -> bool:
     """True when the stream on disk is whole: a finished ladder, or a finished single playlist."""
     if hls_ladder_complete(m3u8_path):
@@ -712,38 +733,6 @@ class VideoConverter:
                 del self.file_conversions[output_filepath]
             if notify_on_exit:
                 self._notify()
-
-
-    @threaded
-    @log.catch_and_log_exceptions
-    def remux_hls_to_mp4(self, variant_playlist: str, output_filepath: str) -> None:
-        """Publish the top rendition of a finished ladder stream as the MP4 (stream copy, no re-encode)."""
-        if self.file_conversions.get(output_filepath):
-            return
-        self.file_conversions[output_filepath] = True
-        self._notify()
-        try:
-            os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
-            tmp = _incomplete_path(output_filepath)
-            result = subprocess.run(
-                [
-                    "ffmpeg", "-nostdin", "-v", "error", "-y",
-                    "-allowed_extensions", "ALL", "-i", variant_playlist,
-                    "-map", "0", "-c", "copy", "-tag:v", "avc1", "-movflags", "faststart", tmp,
-                ],
-                capture_output=True,
-                timeout=1800,
-                check=False,
-            )
-            if result.returncode != 0:
-                with contextlib.suppress(OSError):
-                    os.remove(tmp)
-                raise Exception(f"HLS remux failed for {variant_playlist}: {result.stderr[-300:]!r}")
-            os.replace(tmp, output_filepath)
-        finally:
-            with contextlib.suppress(KeyError):
-                del self.file_conversions[output_filepath]
-            self._notify()
 
 
 class HLSStreamer:
@@ -1299,6 +1288,73 @@ def clear_master_playlist_cache_under(output_dir: str) -> None:
             _master_playlist_cache.pop(key, None)
 
 
+def subtitle_media_lines(output_dir: str, vtt_filenames: List[str], uri_base: str = "") -> List[str]:
+    """EXT-X-MEDIA lines for every VTT, writing each one's sub-playlist next to it in `output_dir`.
+
+    `uri_base` is put in front of the sub-playlist URIs, for a master playlist that is served
+    from somewhere other than `output_dir`.
+    """
+    # Use a generous fixed segment duration so hls.js never tries to fetch a
+    # "next" subtitle segment; the VTT's own cue timestamps determine when each
+    # cue is displayed, independent of EXTINF.
+    duration = 86400.0
+    target_duration = int(math.ceil(duration))
+
+    # Resolve each VTT's language to a (BCP-47 code, display name) pair, then
+    # assign unique NAMEs when a language has multiple tracks. hls.js's
+    # subtitleTrackMatchesTextTrack matches by label+lang, so two manifest
+    # tracks sharing both end up rendered concurrently when one is selected.
+    resolved: List[Tuple[str, str]] = []
+    for vtt in vtt_filenames:
+        vtt_stem = os.path.splitext(vtt)[0]
+        raw = vtt_stem.rsplit("_", 1)[-1] if "_" in vtt_stem else ""
+        code, display = _resolve_subtitle_language(raw.replace('"', ""))
+        resolved.append((code, display))
+    name_totals: Dict[str, int] = {}
+    for _code, display in resolved:
+        name_totals[display] = name_totals.get(display, 0) + 1
+
+    lines: List[str] = []
+    name_seen: Dict[str, int] = {}
+    for vtt, (lang_code, display) in zip(vtt_filenames, resolved, strict=False):
+        name_seen[display] = name_seen.get(display, 0) + 1
+        name = (
+            f"{display} {name_seen[display]}"
+            if name_totals[display] > 1
+            else display
+        )
+        sub_playlist_filename = f"{vtt}.m3u8"
+        sub_playlist_path = os.path.join(output_dir, sub_playlist_filename)
+        # URI attributes in HLS manifests must be valid URIs — VTT filenames can
+        # contain spaces, commas, and other chars that produce malformed manifests
+        # if interpolated raw. Escape both the sub-playlist URI in the master and
+        # the VTT URI inside the sub-playlist itself.
+        sub_playlist_uri = uri_base + urllib.parse.quote(sub_playlist_filename)
+        vtt_uri = urllib.parse.quote(vtt)
+        _atomic_write(
+            sub_playlist_path,
+            (
+                "#EXTM3U\n"
+                "#EXT-X-VERSION:3\n"
+                "#EXT-X-PLAYLIST-TYPE:VOD\n"
+                f"#EXT-X-TARGETDURATION:{target_duration}\n"
+                "#EXT-X-MEDIA-SEQUENCE:0\n"
+                f"#EXTINF:{duration:.3f},\n"
+                f"{vtt_uri}\n"
+                "#EXT-X-ENDLIST\n"
+            ),
+        )
+        # Only emit LANGUAGE for a determined language; an empty LANGUAGE=""
+        # is invalid and makes Safari fall back to "Unknown".
+        language_attr = f'LANGUAGE="{lang_code}",' if lang_code else ""
+        lines.append(
+            f'#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="{name}",'
+            + f"{language_attr}DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,"
+            + f'URI="{sub_playlist_uri}"'
+        )
+    return lines
+
+
 def write_hls_master_playlist(
     output_dir: str,
     video_m3u8_filename: str,
@@ -1324,65 +1380,7 @@ def write_hls_master_playlist(
         if _master_playlist_cache.get(master_path) == signature and os.path.isfile(master_path):
             return master_filename
 
-    # Use a generous fixed segment duration so hls.js never tries to fetch a
-    # "next" subtitle segment; the VTT's own cue timestamps determine when each
-    # cue is displayed, independent of EXTINF.
-    duration = 86400.0
-    target_duration = int(math.ceil(duration))
-
-    # Resolve each VTT's language to a (BCP-47 code, display name) pair, then
-    # assign unique NAMEs when a language has multiple tracks. hls.js's
-    # subtitleTrackMatchesTextTrack matches by label+lang, so two manifest
-    # tracks sharing both end up rendered concurrently when one is selected.
-    resolved: List[Tuple[str, str]] = []
-    for vtt in vtt_filenames:
-        vtt_stem = os.path.splitext(vtt)[0]
-        raw = vtt_stem.rsplit("_", 1)[-1] if "_" in vtt_stem else ""
-        code, display = _resolve_subtitle_language(raw.replace('"', ""))
-        resolved.append((code, display))
-    name_totals: Dict[str, int] = {}
-    for _code, display in resolved:
-        name_totals[display] = name_totals.get(display, 0) + 1
-
-    lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
-    name_seen: Dict[str, int] = {}
-    for vtt, (lang_code, display) in zip(vtt_filenames, resolved, strict=False):
-        name_seen[display] = name_seen.get(display, 0) + 1
-        name = (
-            f"{display} {name_seen[display]}"
-            if name_totals[display] > 1
-            else display
-        )
-        sub_playlist_filename = f"{vtt}.m3u8"
-        sub_playlist_path = os.path.join(output_dir, sub_playlist_filename)
-        # URI attributes in HLS manifests must be valid URIs — VTT filenames can
-        # contain spaces, commas, and other chars that produce malformed manifests
-        # if interpolated raw. Escape both the sub-playlist URI in the master and
-        # the VTT URI inside the sub-playlist itself.
-        sub_playlist_uri = urllib.parse.quote(sub_playlist_filename)
-        vtt_uri = urllib.parse.quote(vtt)
-        _atomic_write(
-            sub_playlist_path,
-            (
-                "#EXTM3U\n"
-                "#EXT-X-VERSION:3\n"
-                "#EXT-X-PLAYLIST-TYPE:VOD\n"
-                f"#EXT-X-TARGETDURATION:{target_duration}\n"
-                "#EXT-X-MEDIA-SEQUENCE:0\n"
-                f"#EXTINF:{duration:.3f},\n"
-                f"{vtt_uri}\n"
-                "#EXT-X-ENDLIST\n"
-            ),
-        )
-        # Only emit LANGUAGE for a determined language; an empty LANGUAGE=""
-        # is invalid and makes Safari fall back to "Unknown".
-        language_attr = f'LANGUAGE="{lang_code}",' if lang_code else ""
-        lines.append(
-            f'#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="{name}",'
-            + f"{language_attr}DEFAULT=NO,AUTOSELECT=YES,FORCED=NO,"
-            + f'URI="{sub_playlist_uri}"'
-        )
-
+    lines = ["#EXTM3U", "#EXT-X-VERSION:3", *subtitle_media_lines(output_dir, vtt_filenames)]
     if info:
         prefix, has_audio, ladder = info
         lines += hls_ladder.stream_inf_lines(ladder, prefix, has_audio, bool(vtt_filenames))

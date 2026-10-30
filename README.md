@@ -14,7 +14,7 @@ This repository is a fork of [hauxir/rapidbay](https://github.com/hauxir/rapidba
 
 -   Uses [Jackett](https://github.com/Jackett/Jackett) and/or [Prowlarr](https://github.com/Prowlarr/Prowlarr) as a search backend.
 -   Pick the individual video file you want to play and the system takes care of the rest to make it streamable.
--   Plays while it converts: the video is encoded on the fly into several quality levels and the player switches between them to match your connection speed.
+-   Plex-style streaming: the video is encoded on the fly, a little ahead of where you are, into several quality levels, and the player switches between them to match your connection speed. Seek anywhere; nothing is converted in advance.
 -   Automatic download of subtitles, converted for all browsers, Chromecast and AppleTV.
 -   Converts audio that browsers don't support to AAC.
 -   Settings page: change almost every option from the browser, no restart needed for most.
@@ -27,7 +27,7 @@ This repository is a fork of [hauxir/rapidbay](https://github.com/hauxir/rapidba
 ## What is different in this fork
 
 -   **New web UI.** The whole frontend is rewritten in Vue 3, TypeScript and Vite (`frontend/`), with a new dark design. Keyboard and TV-remote navigation, resume, favorites, search history and Chromecast are kept. It has unit tests (Vitest) and browser tests (Playwright).
--   **Adaptive-bitrate streaming.** One ffmpeg process encodes 1080p, 720p, 480p and 360p (never above the source) as HLS, and the player picks a level from the measured connection speed. A quality menu pins one. See [Adaptive streaming](#adaptive-streaming).
+-   **Plex-style adaptive streaming.** Downloads are kept as they are and encoded on demand, a few minutes ahead of the playhead, into 1080p, 720p, 480p and 360p (never above the source). The player picks a level from the measured connection speed and you can seek anywhere. See [Adaptive streaming](#adaptive-streaming).
 -   **Settings page** at `/settings`: 35 options in seven categories, saved to `settings.json`, applied live where possible. See [Settings page](#settings-page).
 -   **Trending from TMDB.** The home rails show this week's worldwide trending titles when a TMDB key is set. The empty-search feed is now called "Latest releases".
 -   **Rich search is the only mode,** and a download can be cancelled from its screen.
@@ -128,12 +128,17 @@ If `PASSWORD` is set, the page uses it. If it is not, anyone who can reach the s
 
 ## Adaptive streaming
 
-Playback starts from the first encoded segments, before the download or conversion has finished. One ffmpeg process decodes the file once and encodes every quality level (1080p, 720p, 480p and 360p by default, never above the source size) as HLS. The player picks a level from the measured connection speed, and the quality menu in the player lets you pin one. The encode starts by itself when a download finishes, so nobody has to be watching, and a viewer who opens the file later joins it. When the whole file has been encoded, the top level is copied into the MP4 that Kodi and the rest of the app use. Only a file the streaming encode cannot take (an unusual container, or a codec ffmpeg rejects) falls back to the old full conversion.
+RapidBay streams like Plex or Jellyfin: the download is kept as it is, and video is encoded only while someone watches it, only a little ahead of the playhead.
+
+- **Finished files:** opening a file starts an *encode session*. The player gets the whole timeline at once, so you can seek anywhere. A seek starts the encoder at that point (a few seconds), it runs a few minutes ahead of you and pauses, and segments well behind you are deleted. One ffmpeg process encodes every quality level (1080p, 720p, 480p and 360p by default, never above the source size) and the player switches between them to match your connection speed. A quality menu pins one. The session is removed a few minutes after you stop watching.
+- **Direct play:** an MP4 with H.264 video and AAC audio is served as it is, with no encoding.
+- **While downloading:** a file that is still downloading is encoded from the start as it arrives, as segments, and keeps them until the output folder is cleaned up (`MAX_OUTPUT_FILE_AGE`). Seeking ahead is limited to what has been encoded.
+- **Disk use:** the original download is hard-linked into the output folder rather than copied or converted, so a finished file costs its own size once. A playing session adds a few minutes of video per quality level (62 MB in a 5-minute, 1080p test, against a source of 528 MB). Nothing else is stored.
 
 - **Quality levels:** edit them in Settings, under Streaming.
 - **Hardware encoding:** `HLS_ENCODER=auto` (the default) tries VAAPI when `/dev/dri/renderD128` exists and a bitrate-capped test encode works, and falls back to software x264 otherwise. `HLS_ENCODER=software` or `vaapi` forces one. The local compose file maps `/dev/dri` into the container. Some Intel iGPUs only offer constant-quality VAAPI encoding, which cannot honour the bitrates, so they use software encoding. The VAAPI path has only been unit-tested, not run on a GPU that supports it.
-- **Speed:** each stream must encode faster than real time, and every quality level adds CPU. With software encoding, drop the highest levels in Settings, or set `HLS_X264_PRESET` to `superfast`, if playback stalls. `MAX_PARALLEL_HLS_STREAMS` limits concurrent streams.
-- **Resuming late in a file:** the encode starts at the beginning, so resuming far into a file waits until the encoder reaches that point. The player shows how far it has got and offers to start from the beginning.
+- **Speed:** each session must encode faster than real time, and every quality level adds CPU. With software encoding, drop the highest levels in Settings, or set `HLS_X264_PRESET` to `superfast`, if playback stalls. `MAX_PARALLEL_HLS_STREAMS` limits concurrent sessions.
+- **Kodi and casting:** both get the original file, not an encode, so they need a device that plays its format. Chromecast works for H.264 MP4 files.
 
 ## Subtitles
 

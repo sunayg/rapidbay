@@ -10,6 +10,8 @@ import time
 from threading import Event, Lock, Thread
 from typing import Any, Callable, Dict, List, Set, Tuple
 
+import hls_ladder
+import hls_sessions
 import http_cache
 import log
 import settings
@@ -62,15 +64,34 @@ def _get_output_dir(magnet_hash: str) -> str:
 
 
 def _get_output_filepath(magnet_hash: str, filepath: str) -> str:
-    extension = os.path.splitext(filepath)[1][1:]
-    is_video = extension in settings.VIDEO_EXTENSIONS
-    output_extension = "mp4" if is_video else extension
+    # The output is the download itself (linked, not converted), so it keeps its extension.
+    output_extension = os.path.splitext(filepath)[1][1:]
     return (
         os.path.splitext(
             os.path.join(settings.OUTPUT_DIR, magnet_hash, os.path.basename(filepath))
         )[0]
         + f".{output_extension}"
     )
+
+
+def _link_or_copy(source: str, destination: str) -> None:
+    """Put the downloaded file in the output folder without using a second copy of the disk space.
+
+    A hard link makes the file reachable under both names and keeps its data when the download
+    folder is cleaned up. Only across filesystems does it fall back to a real copy.
+    """
+    tmp = f"{destination}.{os.getpid()}.part"
+    try:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        try:
+            os.link(source, tmp)
+        except OSError:
+            shutil.copyfile(source, tmp)
+        os.replace(tmp, destination)
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
 
 
 def _remove_old_files_and_directories(dirname: str, max_age: int) -> None:
@@ -191,6 +212,10 @@ class RapidBayDaemon:
             download_dir=settings.DOWNLOAD_DIR,
             torrents_dir=settings.TORRENTS_DIR,
         )
+        self._playback_modes: Dict[str, str] = {}
+        sessions_dir = os.path.join(settings.DATA_DIR, "hls_sessions")
+        shutil.rmtree(sessions_dir, ignore_errors=True)  # whatever a previous run left behind
+        self.sessions = hls_sessions.SessionManager(sessions_dir)
         self.video_converter: video_conversion.VideoConverter = video_conversion.VideoConverter()
         self.hls_streamer: video_conversion.HLSStreamer = video_conversion.HLSStreamer()
         self._subtitle_gate: Lock = Lock()
@@ -433,6 +458,7 @@ class RapidBayDaemon:
                 # don't leak into the picker.
                 'subtitles': _get_vtt_subtitles(os.path.dirname(output_filepath), base_filename),
                 'supported': any(filename.endswith(ext) for ext in settings.SUPPORTED_EXTENSIONS),
+                'playback': self._playback_mode(output_filepath),
                 **hls_info,
             }
 
@@ -470,7 +496,7 @@ class RapidBayDaemon:
                 if subtitle_download_status == SubtitleDownloadStatus.DOWNLOADING:
                     return {'status': FileStatus.DOWNLOADING_SUBTITLES, **hls_info}
                 if subtitle_download_status == SubtitleDownloadStatus.FINISHED:
-                    return {'status': FileStatus.WAITING_FOR_CONVERSION, **hls_info}
+                    return {'status': FileStatus.READY_TO_COPY, **hls_info}
             else:
                 return {'status': FileStatus.READY_TO_COPY, **hls_info}
             return {'status': FileStatus.DOWNLOAD_FINISHED, **hls_info}
@@ -607,34 +633,41 @@ class RapidBayDaemon:
         # moov-at-end MP4: streamable via the faststart remux.
         return video_conversion.mp4_remux_layout(filepath, available) is not None
 
-    def _advance_conversion(self, magnet_hash: str, filename: str, filepath: str, output_filepath: str) -> str:
-        """One heartbeat step for a downloaded video that has no MP4 yet. Returns what it did:
-        "encoding" (already running or just started), "waiting" (no free stream slot),
-        "remux" (encode finished, publishing the MP4), "converter" (old full conversion for a
-        file the streaming encode cannot take) or "missing" (the file is not on disk).
+    def create_session(self, magnet_hash: str, filename: str, start_seconds: float = 0.0) -> Dict[str, Any]:
+        """Open (or join) the seekable encode session for a finished file.
 
-        The streaming encode is the converter: it starts here without a viewer, so whoever
-        opens the file later joins an encode that is already under way.
+        Returns {"session": id} or {"session": None, "reason": ...}.
         """
-        m3u8 = _m3u8_path(magnet_hash, filename)
-        if m3u8 in self.hls_streamer.active_streams:
-            return "encoding"
-        if video_conversion.hls_ladder_complete(m3u8):
-            variants = video_conversion.variant_playlist_paths(m3u8)
-            os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
-            self.video_converter.remux_hls_to_mp4(variants[0], output_filepath)
-            return "remux"
-        if not os.path.isfile(filepath):
-            log.debug(f"File not found for conversion, skipping: {filepath}")
-            return "missing"
-        started = self.start_hls_stream(magnet_hash, filename, auto=True)
-        if started.get("started"):
-            return "encoding"
-        if started.get("reason") == "capacity":
-            return "waiting"
-        os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
-        self.video_converter.convert_file(filepath, output_filepath)
-        return "converter"
+        if not _is_valid_magnet_hash(magnet_hash):
+            return {"session": None, "reason": "invalid_path"}
+        output_filepath = _get_output_filepath(magnet_hash, filename)
+        if not _is_safe_subpath(settings.OUTPUT_DIR, output_filepath) or not os.path.isfile(output_filepath):
+            return {"session": None, "reason": "not_ready"}
+        try:
+            session = self.sessions.create(f"{magnet_hash}/{filename}", output_filepath, start_seconds)
+        except hls_sessions.SessionError as e:
+            return {"session": None, "reason": e.reason}
+        return {"session": session.id}
+
+    def session_master_playlist(self, session_id: str, magnet_hash: str, filename: str) -> str | None:
+        """Master playlist of a session: every quality level, plus the file's subtitles."""
+        session = self.sessions.get(session_id)
+        if session is None:
+            return None
+        output_dir = _get_output_dir(magnet_hash)
+        vtts = _get_vtt_subtitles(output_dir, os.path.basename(_get_output_filepath(magnet_hash, filename)))
+        lines = ["#EXTM3U", "#EXT-X-VERSION:7"]
+        lines += video_conversion.subtitle_media_lines(output_dir, vtts, uri_base=f"/play/{magnet_hash}/")
+        lines += hls_ladder.stream_inf_lines(session.ladder, "playlist", session.has_audio, bool(vtts))
+        return "\n".join(lines) + "\n"
+
+    def _playback_mode(self, output_filepath: str) -> str:
+        """"direct" when the browser can play the file as it is, "session" when it needs an encode session."""
+        mode = self._playback_modes.get(output_filepath)
+        if mode is None:
+            mode = "direct" if video_conversion.is_direct_playable(output_filepath) else "session"
+            self._playback_modes[output_filepath] = mode
+        return mode
 
     def _get_available_bytes(self, magnet_hash: str, filename: str) -> int:
         """Contiguous bytes available from the start of the file for pipe
@@ -783,8 +816,6 @@ class RapidBayDaemon:
                 available_subtitle_languages = [lang for lang in [get_subtitle_language(fn) for fn in subtitle_filenames] if lang]
                 embedded_subtitle_languages = [lang for (_, lang) in video_conversion.get_sub_tracks(filepath)]
                 self._download_external_subtitles(filepath, output_dir, skip=available_subtitle_languages + embedded_subtitle_languages)
-            elif is_state(filename, FileStatus.WAITING_FOR_CONVERSION):
-                self._advance_conversion(magnet_hash, filename, filepath, output_filepath)
             elif is_state(filename, FileStatus.READY_TO_COPY) or is_state(
                 filename, FileStatus.CONVERSION_FAILED
             ):
@@ -793,7 +824,7 @@ class RapidBayDaemon:
                     continue
                 output_file_dir = os.path.dirname(output_filepath)
                 os.makedirs(output_file_dir, exist_ok=True)
-                shutil.copy(filepath, output_filepath)
+                _link_or_copy(filepath, output_filepath)
                 self._notify_state_change()
 
     @log.catch_and_log_exceptions

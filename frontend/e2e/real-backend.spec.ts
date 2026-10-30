@@ -83,8 +83,9 @@ test.beforeAll(async () => {
     inContainer("sh", "-c", `printf '%s' '["${ONE}","${TWO}"]' > ${filelistDir}/${hash}`);
   }
   // Pack 1: both files finished (what a completed download leaves behind).
-  put(join(FIXTURES, "sample.mp4"), READY_HASH, `${stem(ONE)}.mp4`);
-  put(join(FIXTURES, "sample.mp4"), READY_HASH, `${stem(TWO)}.mp4`);
+  // (mkv names holding MP4 data: not browser-direct-playable by name, so they go through an encode session)
+  put(join(FIXTURES, "sample.mp4"), READY_HASH, ONE);
+  put(join(FIXTURES, "sample.mp4"), READY_HASH, TWO);
   // Pack 2: file one has only an HLS playlist so far (a live stream); no mp4, no torrent.
   const live = readHlsPlaylist();
   const playlist = join(staging, `${stem(ONE)}.m3u8`);
@@ -148,23 +149,23 @@ test("real file list: the daemon's file list and statuses render", async ({ page
   expect(errors).toEqual([]);
 });
 
-test("real status + /play/: a finished file plays and seeks with no subtitles", async ({ page, request }) => {
+test("real encode session: a finished file plays and seeks with no subtitles", async ({ page, request }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const status = await (await request.get(`/api/magnet/${READY_HASH}/${encodeURIComponent(ONE)}`)).json();
-  expect(status).toMatchObject({ status: "ready", filename: `${stem(ONE)}.mp4`, subtitles: [], supported: true });
+  expect(status).toMatchObject({ status: "ready", filename: ONE, subtitles: [], supported: true, playback: "session" });
 
   await page.goto(url(READY_MAGNET, ONE));
   await expect(page.locator('[data-screen="player-screen"]')).toBeVisible();
   await playing(page, 1);
   let s = await stat(page);
-  expect(s.src).toContain(`/play/${READY_HASH}/${stem(ONE)}.mp4`);
-  expect(s.width).toBe(192); // frames were decoded from the backend's own bytes
+  expect(s.src).toMatch(/^blob:/); // hls.js feeds the element from the session's segments
+  expect(s.width).toBe(192); // frames were decoded from the backend's own encode of the file
   expect(s.duration).toBeGreaterThan(9);
   await expect(page.locator(".player-controls")).toBeVisible();
   await expect(page.locator(".caption-btn")).toHaveCount(0); // no subtitles offered
 
-  // Range seek through FileResponse, by the bar and by the keyboard.
+  // Seeking restarts the encode where needed, by the bar and by the keyboard.
   await page.locator(".player-scrub").evaluate((el: HTMLInputElement) => {
     el.value = "700";
     el.dispatchEvent(new Event("input", { bubbles: true }));

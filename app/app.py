@@ -18,6 +18,7 @@ from typing import Annotated, Any, AsyncIterator, Dict, List, cast, override
 
 import cast_access
 import diskcache
+import hls_sessions
 import http_cache
 import jackett
 import library
@@ -230,6 +231,7 @@ class FileStatusResponse(BaseModel):
     hls_subtitles: List[str] | None = None
     hls_pending: bool | None = None
     can_stream: bool | None = None
+    playback: str | None = None
 
 
 class NextFileResponse(BaseModel):
@@ -1248,6 +1250,47 @@ def cancel_download(magnet_hash: str, filename: str, _: None = Depends(authorize
 @app.post("/api/magnet/{magnet_hash}/{filename}/stream")
 def start_stream(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Dict[str, Any]:
     return daemon.start_hls_stream(magnet_hash, filename)
+
+
+class SessionResponse(BaseModel):
+    url: str | None = None
+    reason: str | None = None
+
+
+@app.post("/api/magnet/{magnet_hash}/{filename}/session", response_model=SessionResponse)
+def open_session(magnet_hash: str, filename: str, start: float = 0.0, _: None = Depends(authorize)) -> Dict[str, Any]:
+    """Open the seekable, adaptive encode session for a finished file. `start` is where playback resumes."""
+    result = daemon.create_session(magnet_hash, filename, max(0.0, start))
+    if not result.get("session"):
+        return {"url": None, "reason": result.get("reason")}
+    return {"url": f"/api/hls/{result['session']}/master.m3u8"}
+
+
+_PLAYLIST_RE = re.compile(r"^playlist_v(\d+)\.m3u8$")
+
+
+@app.get("/api/hls/{session_id}/{name}")
+def session_file(session_id: str, name: str, _: None = Depends(authorize)) -> Response:
+    session = daemon.sessions.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session expired")
+    mpegurl = "application/vnd.apple.mpegurl"
+    if name == "master.m3u8":
+        magnet_hash, _slash, filename = session.key.partition("/")
+        text = daemon.session_master_playlist(session_id, magnet_hash, filename)
+        if text is None:
+            raise HTTPException(status_code=404, detail="Session expired")
+        return Response(text, media_type=mpegurl, headers={"Cache-Control": "no-store"})
+    match = _PLAYLIST_RE.match(name)
+    if match:
+        level = int(match.group(1))
+        if level >= len(session.ladder):
+            raise HTTPException(status_code=404)
+        return Response(hls_sessions.variant_playlist(session, level), media_type=mpegurl, headers={"Cache-Control": "no-store"})
+    path = daemon.sessions.file_for(session, name)
+    if path is None:
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="video/mp4")
 
 
 def _file_status(magnet_hash: str, filename: str) -> Dict[str, Any]:

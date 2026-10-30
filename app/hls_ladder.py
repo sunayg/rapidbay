@@ -142,7 +142,7 @@ def _vaapi_works(device: str) -> bool:
         return False
 
 
-def _filter_graph(ladder: Sequence[Rendition], src_height: int, encoder: str) -> str:
+def filter_graph(ladder: Sequence[Rendition], src_height: int, encoder: str) -> str:
     count = len(ladder)
     if encoder == VAAPI:
         head = "[0:v:0]format=nv12,hwupload"
@@ -158,6 +158,36 @@ def _filter_graph(ladder: Sequence[Rendition], src_height: int, encoder: str) ->
         else:
             parts.append(f"[s{r.index}]" + scale.format(w=r.width, h=r.height) + f"[v{r.index}]")
     return ";".join(parts)
+
+
+def _variant_token(ladder: Sequence[Rendition]) -> str:
+    """ffmpeg fills %v in the init file name only when there is more than one rendition."""
+    return "%v" if len(ladder) > 1 else "0"
+
+
+def encode_args(
+    ladder: Sequence[Rendition],
+    encoder: str,
+    preset: str,
+    segment_seconds: int,
+    audio_args: Sequence[str] | None,
+) -> List[str]:
+    """Codec, rate-control and keyframe options shared by every way of running the ladder."""
+    args: List[str] = []
+    args += ["-c:v", encoder, "-profile:v", "high"]
+    if encoder == SOFTWARE:
+        args += ["-preset", preset, "-level", "4.1", "-sc_threshold", "0", "-pix_fmt", "yuv420p"]
+    args += ["-force_key_frames", f"expr:gte(t,n_forced*{segment_seconds})"]
+    for r in ladder:
+        args += [
+            f"-b:v:{r.index}", f"{r.video_kbps}k",
+            f"-maxrate:v:{r.index}", f"{r.maxrate_kbps}k",
+            f"-bufsize:v:{r.index}", f"{r.bufsize_kbps}k",
+        ]
+    if audio_args is not None:
+        args += list(audio_args)
+    args += ["-tag:v", "avc1"]
+    return args
 
 
 def build_ffmpeg_args(
@@ -179,25 +209,13 @@ def build_ffmpeg_args(
     args: List[str] = ["ffmpeg", "-nostdin"]
     if encoder == VAAPI:
         args += ["-init_hw_device", f"vaapi=va:{VAAPI_DEVICE}", "-filter_hw_device", "va"]
-    args += ["-i", "pipe:0", "-sn", "-filter_complex", _filter_graph(ladder, src_height, encoder)]
+    args += ["-i", "pipe:0", "-sn", "-filter_complex", filter_graph(ladder, src_height, encoder)]
     for r in ladder:
         args += ["-map", f"[v{r.index}]"]
     if audio_args is not None:
         for _ in ladder:
             args += ["-map", "0:a:0"]
-    args += ["-c:v", encoder, "-profile:v", "high"]
-    if encoder == SOFTWARE:
-        args += ["-preset", preset, "-level", "4.1", "-sc_threshold", "0", "-pix_fmt", "yuv420p"]
-    args += ["-force_key_frames", f"expr:gte(t,n_forced*{segment_seconds})"]
-    for r in ladder:
-        args += [
-            f"-b:v:{r.index}", f"{r.video_kbps}k",
-            f"-maxrate:v:{r.index}", f"{r.maxrate_kbps}k",
-            f"-bufsize:v:{r.index}", f"{r.bufsize_kbps}k",
-        ]
-    if audio_args is not None:
-        args += list(audio_args)
-    args += ["-tag:v", "avc1"]
+    args += encode_args(ladder, encoder, preset, segment_seconds, audio_args)
     stream_map = " ".join(f"v:{r.index},a:{r.index}" if audio_args is not None else f"v:{r.index}" for r in ladder)
     args += [
         "-f", "hls",
@@ -205,7 +223,7 @@ def build_ffmpeg_args(
         "-hls_segment_type", "fmp4",
         "-hls_time", str(segment_seconds),
         "-hls_init_time", str(segment_seconds),
-        "-hls_fmp4_init_filename", f"{prefix}_v%v_init.mp4",
+        "-hls_fmp4_init_filename", f"{prefix}_v{_variant_token(ladder)}_init.mp4",
         "-hls_segment_filename", f"{prefix}_v%v_seg_%04d.m4s",
         "-var_stream_map", stream_map,
         f"{prefix}_v%v.m3u8",
@@ -223,3 +241,53 @@ def stream_inf_lines(ladder: Sequence[Rendition], prefix: str, has_audio: bool, 
             tag += ',SUBTITLES="subs"'
         lines += [tag, f"{prefix}{r.playlist_suffix}"]
     return lines
+
+
+def build_session_args(
+    ladder: Sequence[Rendition],
+    src_height: int,
+    encoder: str,
+    preset: str,
+    segment_seconds: int,
+    source: str,
+    audio_args: Sequence[str] | None,
+    start_segment: int,
+    init_prefix: str,
+) -> List[str]:
+    """ffmpeg arguments for a seekable session: read `source` by path from `start_segment`.
+
+    Output goes to the working directory as `seg_v{N}_{index:04d}.m4s` with the index and the
+    timestamps continuing from the start point, so a restarted encode lands on the same timeline
+    as the one it replaced. `init_prefix` names the init files (`{init_prefix}_v{N}.mp4`); a
+    restart gives them a new name because their edit lists differ, and the first one is kept.
+    """
+    start = start_segment * segment_seconds
+    args: List[str] = ["ffmpeg", "-nostdin", "-v", "error"]
+    if encoder == VAAPI:
+        args += ["-init_hw_device", f"vaapi=va:{VAAPI_DEVICE}", "-filter_hw_device", "va"]
+    if start > 0:
+        args += ["-ss", str(start)]
+    args += ["-i", source, "-sn", "-filter_complex", filter_graph(ladder, src_height, encoder)]
+    for r in ladder:
+        args += ["-map", f"[v{r.index}]"]
+    if audio_args is not None:
+        for _ in ladder:
+            args += ["-map", "0:a:0"]
+    args += encode_args(ladder, encoder, preset, segment_seconds, audio_args)
+    if start > 0:
+        # Timestamps restart at 0 after -ss; shift them back so segment N sits at N * seconds.
+        args += ["-output_ts_offset", str(start)]
+    stream_map = " ".join(f"v:{r.index},a:{r.index}" if audio_args is not None else f"v:{r.index}" for r in ladder)
+    args += [
+        "-f", "hls",
+        "-hls_segment_type", "fmp4",
+        "-hls_time", str(segment_seconds),
+        "-hls_list_size", "0",
+        "-start_number", str(start_segment),
+        "-hls_flags", "temp_file",
+        "-hls_fmp4_init_filename", f"{init_prefix}_v{_variant_token(ladder)}.mp4",
+        "-hls_segment_filename", "seg_v%v_%04d.m4s",
+        "-var_stream_map", stream_map,
+        "ff_v%v.m3u8",
+    ]
+    return args

@@ -1,4 +1,10 @@
+import { existsSync } from "node:fs";
 import { defineConfig } from "@playwright/test";
+
+// The encode sessions produce H.264, which the Chromium that Playwright bundles cannot play. Those
+// specs run in an installed Google Chrome, and are skipped when there is none.
+const H264_SPECS = /encode session/;
+const HAS_CHROME = !!process.env.E2E_CHROME || ["/usr/bin/google-chrome", "/opt/google/chrome/chrome"].some((p) => existsSync(p));
 
 // Runs against a running RapidBay stack: BASE_URL=http://localhost:5050 npm run e2e
 export default defineConfig({
@@ -16,9 +22,22 @@ export default defineConfig({
     {
       name: "chromium",
       testIgnore: /tv\.spec/,
+      grepInvert: H264_SPECS,
       // The player starts on its own; a real user would have clicked to get here.
       use: { browserName: "chromium", launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] } },
     },
+    ...(HAS_CHROME
+      ? [
+          {
+            name: "chrome-h264",
+            // Both projects seed and remove the same test data in the container, so they must not overlap.
+            dependencies: ["chromium"],
+            testMatch: /real-backend\.spec/,
+            grep: H264_SPECS,
+            use: { browserName: "chromium" as const, channel: "chrome", launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] } },
+          },
+        ]
+      : []),
     // Android TV: the UA flips the app into its tv-ui mode (see src/lib/focus.ts, TV_USER_AGENT);
     // only tv.spec.ts runs here, at the two sizes a TV browser reports (1080p, and 540p at 2x).
     ...[
