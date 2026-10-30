@@ -233,23 +233,38 @@ def detect_encoder(preference: str, device: str = VAAPI_DEVICE) -> str:
     return chosen
 
 
+# Many Intel iGPUs (Kaby Lake and later) only offer the low-power H.264 encoder, which h264_vaapi
+# uses only when asked with -low_power 1. Set by _vaapi_works when that is the one that works.
+_vaapi_low_power = False
+
+
 def reset_encoder_cache() -> None:
+    global _vaapi_low_power
     _encoder_cache.clear()
+    _vaapi_low_power = False
 
 
 def _vaapi_works(device: str) -> bool:
-    cmd = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-        "-init_hw_device", f"vaapi=va:{device}", "-filter_hw_device", "va",
-        "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=24:duration=1",
-        "-vf", "format=nv12,hwupload",
-        "-c:v", VAAPI, "-b:v", "2M", "-maxrate", "2M", "-bufsize", "4M",
-        "-f", "null", "-",
-    ]
-    try:
-        return subprocess.run(cmd, capture_output=True, timeout=20, check=False).returncode == 0
-    except Exception:
-        return False
+    """Whether a test encode with a bitrate cap succeeds, with the normal encoder or else the low-power one."""
+    global _vaapi_low_power
+    for low_power in (False, True):
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+            "-init_hw_device", f"vaapi=va:{device}", "-filter_hw_device", "va",
+            "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=24:duration=1",
+            "-vf", "format=nv12,hwupload",
+            "-c:v", VAAPI, *(["-low_power", "1"] if low_power else []),
+            "-b:v", "2M", "-maxrate", "2M", "-bufsize", "4M",
+            "-f", "null", "-",
+        ]
+        try:
+            ok = subprocess.run(cmd, capture_output=True, timeout=20, check=False).returncode == 0
+        except Exception:
+            ok = False
+        if ok:
+            _vaapi_low_power = low_power
+            return True
+    return False
 
 
 def filter_graph(ladder: Sequence[Rendition], src_height: int, encoder: str) -> str:
@@ -285,6 +300,8 @@ def encode_args(
     """Codec, rate-control and keyframe options shared by every way of running the ladder."""
     args: List[str] = []
     args += ["-c:v", encoder, "-profile:v", "high"]
+    if encoder == VAAPI and _vaapi_low_power:
+        args += ["-low_power", "1"]
     if encoder == SOFTWARE:
         args += ["-preset", preset, "-level", "4.1", "-sc_threshold", "0", "-pix_fmt", "yuv420p"]
     args += ["-force_key_frames", f"expr:gte(t,n_forced*{segment_seconds})"]

@@ -220,3 +220,32 @@ def test_the_default_downmix_leaves_the_mix_to_ffmpeg_but_still_honours_the_boos
 def test_a_boost_never_applies_to_a_track_that_is_not_downmixed():
     assert hls_ladder.downmix_filter(_surround("stereo", channels=2), 2, "nightmode", 300) is None
     assert hls_ladder.downmix_filter(_surround(), 6, "nightmode", 300) is None
+
+
+def test_the_low_power_encoder_is_asked_for_only_when_it_is_the_one_that_works(monkeypatch):
+    ladder = plan_ladder(1920, 1080, [1080])
+    hls_ladder.reset_encoder_cache()
+    assert "-low_power" not in hls_ladder.encode_args(ladder, VAAPI, "veryfast", 6, None)
+    monkeypatch.setattr(hls_ladder, "_vaapi_low_power", True)
+    args = hls_ladder.encode_args(ladder, VAAPI, "veryfast", 6, None)
+    assert args[args.index("-low_power") + 1] == "1"
+    assert "-low_power" not in hls_ladder.encode_args(ladder, SOFTWARE, "veryfast", 6, None)
+    hls_ladder.reset_encoder_cache()
+
+
+def test_detection_falls_back_to_the_low_power_encoder(monkeypatch):
+    runs: list[list[str]] = []
+
+    class Done:
+        def __init__(self, code: int) -> None:
+            self.returncode = code
+
+    def fake_run(cmd, **_kw):
+        runs.append(cmd)
+        return Done(0 if "-low_power" in cmd else 1)  # only the low-power encoder works
+
+    hls_ladder.reset_encoder_cache()
+    monkeypatch.setattr(hls_ladder.subprocess, "run", fake_run)
+    assert hls_ladder._vaapi_works("/dev/dri/renderD128")
+    assert len(runs) == 2 and hls_ladder._vaapi_low_power
+    hls_ladder.reset_encoder_cache()
