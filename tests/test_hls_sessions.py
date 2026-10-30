@@ -498,3 +498,13 @@ def test_a_session_nobody_has_asked_for_is_closed_and_its_folder_removed(tmp_pat
     session.last_request -= hs.IDLE_SECONDS + 5
     manager._tend(session)
     assert manager.keys() == [] and not directory.exists() and session.closed
+
+
+def test_a_hardware_session_that_keeps_failing_makes_the_next_one_use_software(tmp_path, monkeypatch):
+    monkeypatch.setattr(hs.hls_ladder, "_encoder_cache", {"auto": hs.hls_ladder.VAAPI})
+    manager, session, _starts = _failing_session(tmp_path, monkeypatch)
+    session.encoder = hs.hls_ladder.VAAPI
+    session.latest = 0
+    assert manager.file_for(session, hs.segment_name(0, 0)) is None
+    assert session.dead
+    assert hs.hls_ladder.detect_encoder("auto") == hs.hls_ladder.SOFTWARE

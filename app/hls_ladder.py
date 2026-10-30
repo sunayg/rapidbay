@@ -233,6 +233,12 @@ def detect_encoder(preference: str, device: str = VAAPI_DEVICE) -> str:
     return chosen
 
 
+def fall_back_to_software() -> None:
+    """The hardware encoder was chosen but sessions keep dying on it: use software from now on."""
+    for preference in ("auto", "vaapi"):
+        _encoder_cache[preference] = SOFTWARE
+
+
 # Many Intel iGPUs (Kaby Lake and later) only offer the low-power H.264 encoder, which h264_vaapi
 # uses only when asked with -low_power 1. Set by _vaapi_works when that is the one that works.
 _vaapi_low_power = False

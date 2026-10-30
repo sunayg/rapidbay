@@ -502,6 +502,8 @@ class SessionManager:
             session.failures += 1
             if session.failures > MAX_ENCODER_FAILURES:
                 session.dead = True
+                if session.encoder == hls_ladder.VAAPI:
+                    hls_ladder.fall_back_to_software()  # the replacement session then encodes in software
                 log.debug(f"HLS session {session.id[:8]}: encoder keeps failing (exit {failed.returncode}), giving up")
                 return False
             self._start_process(session, index if abs(index - session.latest) <= RESTART_GAP else session.latest)

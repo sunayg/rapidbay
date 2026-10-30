@@ -45,7 +45,7 @@ RUN apt-get update && \
     ffmpeg \
     mediainfo \
     vainfo \
-    intel-media-va-driver \
+    intel-media-va-driver-non-free \
     ca-certificates \
     python3 \
     python3-venv \
