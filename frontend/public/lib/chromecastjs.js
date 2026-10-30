@@ -113,6 +113,7 @@ var ChromecastJS = function(scope, reciever) {
     }
     // Check if a chromecast is available, trigger 'Init' event
     var castChecks = 0
+    var initialised = false
     var castInterval = setInterval(function() {
         castChecks += 1
         if (castChecks > 240) {
@@ -122,9 +123,29 @@ var ChromecastJS = function(scope, reciever) {
         }
         if (typeof window.chrome !== 'undefined' && typeof window.chrome.cast !== 'undefined' && window.chrome.cast.isAvailable) {
             clearInterval(castInterval)
-            Init()
+            InitOnce()
         }
     }, 250)
+    // Google's documented signal that the SDK is ready (Chrome on Android sets it
+    // without ever flipping chrome.cast.isAvailable); the sender script is added
+    // after this constructor runs, so the handler is in place before it loads.
+    var previousHandler = window.__onGCastApiAvailable
+    window.__onGCastApiAvailable = function(isAvailable) {
+        if (typeof previousHandler === 'function') {
+            previousHandler(isAvailable)
+        }
+        if (isAvailable) {
+            clearInterval(castInterval)
+            InitOnce()
+        }
+    }
+    function InitOnce() {
+        if (initialised || typeof cast === 'undefined' || !cast.framework) {
+            return
+        }
+        initialised = true
+        Init()
+    }
     // Call event function
     function TriggerEvent(event, args) {
         if (typeof that.Events[event] !== 'undefined') {

@@ -471,13 +471,39 @@ describe("download screen", () => {
     expect(wrapper.findComponent({ name: "PlayerHost" }).props("url")).toBe("/api/hls/abc123/master.m3u8");
   });
 
-  it("shows an error with retry when a finished file has no room for a session", async () => {
-    handlers[SESSION] = () => ({ url: null, reason: "capacity" });
+  it("waits and asks again when a finished file has no room for a session yet", async () => {
+    vi.useFakeTimers();
+    let answers = [{ url: null, reason: "capacity" }, { url: "/api/hls/abc123/master.m3u8" }];
+    handlers[SESSION] = () => answers.shift();
     const { wrapper } = await download();
+    const source = FakeEventSource.last("/api/magnet_events/");
+    source.emit(info(readySession));
+    await flushPromises();
+    expect(wrapper.find(".stream-message").text()).toContain("capacity");
+    expect(wrapper.find(".dl-error").exists()).toBe(false);
+    await vi.advanceTimersByTimeAsync(5100);
+    source.emit(info(readySession));
+    await flushPromises();
+    expect(wrapper.findComponent({ name: "PlayerHost" }).props("url")).toBe("/api/hls/abc123/master.m3u8");
+  });
+
+  it("shows an error with retry when a finished file's session fails twice", async () => {
+    let n = 0;
+    handlers[SESSION] = () => ({ url: `/api/hls/session-${++n}/master.m3u8` });
+    const { wrapper } = await download();
+    const source = FakeEventSource.last("/api/magnet_events/");
+    source.emit(info(readySession));
+    await flushPromises();
+    wrapper.findComponent({ name: "PlayerHost" }).vm.$emit("stream-error");
+    await flushPromises();
+    wrapper.findComponent({ name: "PlayerHost" }).vm.$emit("stream-error");
+    await flushPromises();
+    expect(wrapper.find(".dl-error").text()).toContain("Playback failed");
+    await wrapper.find(".dl-error button").trigger("click");
+    await flushPromises();
     FakeEventSource.last("/api/magnet_events/").emit(info(readySession));
     await flushPromises();
-    expect(wrapper.findComponent({ name: "PlayerHost" }).exists()).toBe(false);
-    expect(wrapper.find(".dl-error").text()).toContain("capacity");
+    expect(wrapper.findComponent({ name: "PlayerHost" }).exists()).toBe(true);
   });
 
   it("plays a browser-friendly MP4 directly, with no session", async () => {

@@ -286,6 +286,33 @@ def test_an_init_file_is_not_sent_while_ffmpeg_is_still_writing_it(tmp_path, mon
     assert manager.file_for(session, "init_v0.mp4") == str(init)
 
 
+def test_a_first_run_cut_short_leaves_its_init_empty_and_a_later_run_stands_in(tmp_path, monkeypatch):
+    monkeypatch.setattr(hs, "SEGMENT_WAIT_SECONDS", 0.3)
+    manager = hs.SessionManager(str(tmp_path))
+    session = _session(directory=str(tmp_path))
+    session.runs = 2
+    monkeypatch.setattr(manager, "_ensure_encoding", lambda s, i: None)
+    (tmp_path / "init_v0.mp4").write_bytes(b"")  # run 1 was replaced before it wrote anything
+    (tmp_path / "rinit2_v0.mp4").write_bytes(b"ftyp-moov")
+    assert manager.file_for(session, "init_v0.mp4") is None  # no segment yet
+    (tmp_path / hs.segment_name(0, 5)).write_bytes(b"x")
+    assert manager.file_for(session, "init_v0.mp4") == str(tmp_path / "init_v0.mp4")
+    assert (tmp_path / "init_v0.mp4").read_bytes() == b"ftyp-moov"
+
+
+def test_the_feeder_keeps_going_after_the_torrent_is_removed_and_the_file_is_linked(tmp_path, monkeypatch):
+    monkeypatch.setattr(hs.time, "sleep", lambda _s: None)
+    path = tmp_path / "movie.mkv"
+    path.write_bytes(b"y" * 500)
+    final = tmp_path / "final.mkv"
+    final.hardlink_to(path)
+    # Open file still readable after the torrent's copy is deleted; its count reads 0.
+    growing = hs.GrowingSource(total_size=500, available=lambda: 0, final_path=str(final))
+    proc = _FakeProc()
+    hs.SessionManager._feed(str(path), growing, proc)  # type: ignore[arg-type]
+    assert len(proc.stdin.data) == 500
+
+
 def test_an_init_file_waits_for_a_segment_of_its_own_variant(tmp_path, monkeypatch):
     monkeypatch.setattr(hs, "SEGMENT_WAIT_SECONDS", 0.3)
     manager = hs.SessionManager(str(tmp_path))

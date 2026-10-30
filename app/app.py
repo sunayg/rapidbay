@@ -1514,12 +1514,13 @@ def play(magnet_hash: str, filename: str, _: None = Depends(authorize)) -> Respo
 
 class CastLinkResponse(BaseModel):
     prefix: str
+    origin: str = ""  # where the TV should fetch from; empty means where the page came from
 
 
 @app.get("/api/cast_link/{magnet_hash}", response_model=CastLinkResponse)
 def cast_link(magnet_hash: str, _: None = Depends(authorize)) -> Dict[str, str]:
     """Path prefix a Chromecast can use for this torrent's files without logging in."""
-    return {"prefix": f"/cast/{cast_access.make_token(magnet_hash)}/{magnet_hash}/"}
+    return {"prefix": f"/cast/{cast_access.make_token(magnet_hash)}/{magnet_hash}/", "origin": settings.CAST_ORIGIN.rstrip("/")}
 
 
 @app.get("/cast/{token}/{magnet_hash}/session/{session_id}/{name}")

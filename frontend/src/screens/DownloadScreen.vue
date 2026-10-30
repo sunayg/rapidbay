@@ -130,12 +130,13 @@ async function openSession(ready: boolean): Promise<void> {
       return;
     }
     const reason = data && data.reason;
-    if (ready) {
+    if (ready && reason !== "capacity") {
       sessionRequested = false;
       failed.value = streamDeclinedMessage(reason);
     } else {
       streamMessage.value = streamDeclinedMessage(reason);
-      // Not ready or at capacity: try again in a moment. Other reasons will not change. A plain timer:
+      // Not ready or at capacity (other streams can free up, ready file or not): try again in a moment.
+      // Other reasons will not change. A plain timer:
       // routeTimeout would cancel the status polling timer, which also keeps one pending.
       if (reason === "not_ready" || reason === "capacity") setTimeout(() => !stale() && (sessionRequested = false), 5000);
     }
@@ -162,15 +163,17 @@ async function cancelDownload(): Promise<void> {
 // unsupported codec, a broken file): drop back to the progress view.
 let lastReopen = 0;
 function onStreamError(): void {
-  const failed = playLink.value;
+  const failedLink = playLink.value;
   playLink.value = null;
-  if (failed && failed.startsWith("/api/hls/") && Date.now() - lastReopen > 30_000) {
+  if (failedLink && failedLink.startsWith("/api/hls/") && Date.now() - lastReopen > 30_000) {
     lastReopen = Date.now();
     sessionRequested = false;
     void openSession(status.value === "ready");
     return;
   }
   hlsFailed.value = true;
+  // A ready file has no progress view to fall back to: say so, with the retry button.
+  if (status.value === "ready") failed.value = "Playback failed. Try again.";
 }
 
 async function start(): Promise<void> {
@@ -201,6 +204,9 @@ async function start(): Promise<void> {
 }
 
 function retry(): void {
+  hlsFailed.value = false;
+  sessionRequested = false;
+  lastReopen = 0;
   polling = false;
   closeSource();
   void start();

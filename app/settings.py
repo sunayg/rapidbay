@@ -75,6 +75,7 @@ HLS_ENCODER: str = "auto"  # auto, software or vaapi
 HLS_X264_PRESET: str = "veryfast"  # software encoder speed/quality trade-off
 HLS_SEGMENT_DURATION: int = 6  # seconds per HLS segment
 HLS_START_SECONDS: int = 20  # seconds of video that must have downloaded, from the start, before playback begins
+CAST_ORIGIN: str = ""  # address a Chromecast can reach RapidBay at, e.g. http://192.168.1.20:5050; empty = the address the page was opened at
 MAX_PARALLEL_HLS_STREAMS: int = 2  # cap on concurrent encode sessions
 HLS_PREFETCH_BYTES: int = 32 * 1024 * 1024  # rolling deadline-rushed window the streamer keeps ahead of the pipe feeder
 

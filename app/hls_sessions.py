@@ -161,6 +161,19 @@ def produced_indexes(directory: str, level: int = 0) -> List[int]:
     return sorted(found)
 
 
+def _adopt_later_init(directory: str, level: int, path: str) -> bool:
+    """Copy a restarted run's init file over the first run's, which was cut short and stayed empty."""
+    pattern = re.compile(rf"^rinit\d+_v{level}\.mp4$")
+    with contextlib.suppress(OSError):
+        for name in sorted(os.listdir(directory)):
+            source = os.path.join(directory, name)
+            if pattern.match(name) and os.path.getsize(source) > 0:
+                shutil.copyfile(source, path + ".tmp")
+                os.replace(path + ".tmp", path)
+                return True
+    return False
+
+
 def encoded_through(indexes: List[int], start: int) -> int:
     """Last segment of the unbroken run that begins at `start` (start - 1 when none is there yet).
 
@@ -370,6 +383,9 @@ class SessionManager:
             return
         try:
             while not os.path.isfile(path):
+                if growing.final_path and os.path.isfile(growing.final_path):
+                    path = growing.final_path  # the download finished and was moved before the encoder got here
+                    break
                 if proc.poll() is not None:
                     return
                 time.sleep(0.5)
@@ -379,9 +395,13 @@ class SessionManager:
                         growing.request_window(written)
                         next_window_at = written + settings.HLS_PREFETCH_BYTES // 2
                     # The piece count can run ahead of the bytes flushed to the file.
-                    available = growing.available()
-                    with contextlib.suppress(OSError):
-                        available = min(available, os.path.getsize(path))
+                    if growing.final_path and os.path.exists(growing.final_path):
+                        # Finished and linked: the torrent may be gone by now (its count reads 0), but the file we hold open is whole.
+                        available = os.fstat(f.fileno()).st_size
+                    else:
+                        available = growing.available()
+                        with contextlib.suppress(OSError):
+                            available = min(available, os.path.getsize(path))
                     if available <= written:
                         if written >= growing.total_size:
                             break
@@ -491,14 +511,16 @@ class SessionManager:
     def _ready(session: Session, kind: str, level: int, path: str) -> bool:
         """Whether the file can be sent. An init file exists as soon as ffmpeg opens it, but its contents are
         written later: sent early, the player gets an empty file and cannot start. Once a segment of that
-        variant exists, the init file is whole."""
-        if not os.path.isfile(path):
-            return False
+        variant exists, the init file is whole. If the first run was replaced before it got that far, its init
+        file stays empty for good; a later run's identical one stands in for it."""
         if kind != "init":
-            return True
+            return os.path.isfile(path)
+        if not produced_indexes(session.directory, level):
+            return False
         with contextlib.suppress(OSError):
-            return os.path.getsize(path) > 0 and bool(produced_indexes(session.directory, level))
-        return False
+            if os.path.getsize(path) > 0:
+                return True
+        return _adopt_later_init(session.directory, level, path)
 
     # -- housekeeping ------------------------------------------------------------------------
 

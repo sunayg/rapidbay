@@ -152,3 +152,12 @@ def test_a_cast_session_link_is_refused_for_the_wrong_token_torrent_or_session(s
     # A token for another torrent cannot open this torrent's session.
     other_token = cast_access.make_token(other)
     assert session_client.get(f"/cast/{other_token}/{other}/session/sid1/master.m3u8").status_code == 404
+
+
+def test_cast_link_reports_the_configured_origin(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(app_module.settings, "CAST_ORIGIN", "http://192.168.1.20:5050/")
+    response = client.get(f"/api/cast_link/{HASH}", headers={"Authorization": "Bearer secret"})
+    assert response.json()["origin"] == "http://192.168.1.20:5050"
+    monkeypatch.setattr(app_module.settings, "CAST_ORIGIN", "")
+    response = client.get(f"/api/cast_link/{HASH}", headers={"Authorization": "Bearer secret"})
+    assert response.json()["origin"] == ""

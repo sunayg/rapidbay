@@ -99,7 +99,8 @@ export async function castVideo(request: CastRequest): Promise<string | null> {
   let prefix: string;
   try {
     // The TV cannot send the password, so it gets a signed link for this torrent.
-    prefix = window.location.origin + (await get<{ prefix: string }>("/api/cast_link/" + parts[1])).prefix;
+    const link = await get<{ prefix: string; origin?: string }>("/api/cast_link/" + parts[1]);
+    prefix = (link.origin || window.location.origin) + link.prefix;
   } catch {
     return "Could not prepare a cast link.";
   }
