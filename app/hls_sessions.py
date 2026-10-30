@@ -163,7 +163,7 @@ def encoded_through(indexes: List[int], start: int) -> int:
     return last
 
 
-def _probe_duration(source: str) -> float | None:
+def probe_duration(source: str) -> float | None:
     try:
         out = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", source],
@@ -196,7 +196,7 @@ class SessionManager:
             self._make_room()
         if not os.path.isfile(source):
             raise SessionError("file_not_found")
-        duration = _probe_duration(source)
+        duration = probe_duration(source)
         size = hls_ladder.probe_video_size(source)
         if duration is None or size is None:
             raise SessionError("unreadable")

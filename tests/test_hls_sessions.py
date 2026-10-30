@@ -232,7 +232,7 @@ def test_sessions_for_a_torrent_or_file_are_closed_by_prefix(tmp_path):
 def test_create_keeps_the_growing_source_and_the_audio_tracks(tmp_path, monkeypatch):
     source = tmp_path / "movie.mkv"
     source.write_bytes(b"x")
-    monkeypatch.setattr(hs, "_probe_duration", lambda _p: 60.0)
+    monkeypatch.setattr(hs, "probe_duration", lambda _p: 60.0)
     monkeypatch.setattr(hs.hls_ladder, "probe_video_size", lambda _p: (1280, 720))
     tracks = [hls_ladder.AudioTrack(0, "aac", "eng", ""), hls_ladder.AudioTrack(1, "aac", "fra", "")]
     monkeypatch.setattr(hs.hls_ladder, "probe_audio_tracks", lambda _p: tracks)
@@ -247,3 +247,22 @@ def test_create_keeps_the_growing_source_and_the_audio_tracks(tmp_path, monkeypa
     assert session.growing is growing
     assert session.audio_tracks == tracks and session.separate_audio
     assert session.variant_count == len(session.ladder) + 2
+
+
+def test_the_start_point_is_seconds_of_this_files_own_video():
+    from rapidbaydaemon import _start_threshold_bytes
+
+    mib = 1024 * 1024
+    # A 1 GB, 100-minute file runs at about 0.17 MB/s: 20 s is about 3.4 MB, so the 4 mib of headers rule.
+    assert _start_threshold_bytes(1000 * mib, 6000.0, 20) == 4 * mib
+    # The same length at 20 times the size (a remux) needs 20 times as many bytes for the same 20 s.
+    assert _start_threshold_bytes(20000 * mib, 6000.0, 20) == int(20000 * mib / 6000.0 * 20)
+    # More seconds, more bytes.
+    assert abs(_start_threshold_bytes(5000 * mib, 3000.0, 60) - 3 * _start_threshold_bytes(5000 * mib, 3000.0, 20)) <= 3
+    # Never more than a quarter of the file, so a short clip is not locked out.
+    assert _start_threshold_bytes(40 * mib, 30.0, 20) == 10 * mib
+    # Length unknown: the old 50 mib, still capped by the quarter rule.
+    assert _start_threshold_bytes(1000 * mib, None, 20) == 50 * mib
+    assert _start_threshold_bytes(80 * mib, None, 20) == 20 * mib
+    # Tiny files still get a floor of 1 mib.
+    assert _start_threshold_bytes(2 * mib, 10.0, 20) == 1 * mib

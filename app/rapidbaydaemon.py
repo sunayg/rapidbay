@@ -154,11 +154,22 @@ def _is_safe_subpath(parent: str, child: str) -> bool:
     return os.path.commonpath([parent_abs, child_abs]) == parent_abs
 
 
-def _hls_effective_threshold(file_size: int) -> int:
-    # Cap the configured threshold at a fraction of the file size so small
-    # files (e.g. 30 MB) aren't permanently locked out of HLS by a 50 MB floor.
-    # Floor at 1 MiB so very tiny files still see a meaningful warm-up window.
-    return min(settings.HLS_START_THRESHOLD, max(file_size // 4, 1024 * 1024))
+# The start of a file holds the container headers (tracks, codecs, duration): this much is read first.
+_HEADER_BYTES = 4 * 1024 * 1024
+# What to wait for when the file's length is not known yet or cannot be read.
+_FALLBACK_START_BYTES = 50 * 1024 * 1024
+
+
+def _start_threshold_bytes(file_size: int, duration: float | None, seconds: float) -> int:
+    """Contiguous bytes from the start of a file that must be on disk before it can start playing.
+
+    `seconds` of video, at this file's own average rate (size over duration). Never less than the
+    container headers, and never more than a quarter of the file, so a small file is not locked out.
+    """
+    cap = max(file_size // 4, 1024 * 1024)
+    head = min(_HEADER_BYTES, cap)
+    wanted = int(file_size / duration * seconds) if duration and duration > 0 else _FALLBACK_START_BYTES
+    return min(max(wanted, head), cap)
 
 
 def _get_vtt_subtitles(output_dir: str, video_filename: str) -> List[str]:
@@ -209,6 +220,9 @@ class RapidBayDaemon:
             torrents_dir=settings.TORRENTS_DIR,
         )
         self._playback_modes: Dict[str, str] = {}
+        # Length of each file, read from its headers once enough of it has downloaded; and when the last try failed.
+        self._durations: Dict[Tuple[str, str], float] = {}
+        self._duration_tries: Dict[Tuple[str, str], float] = {}
         sessions_dir = os.path.join(settings.DATA_DIR, "hls_sessions")
         shutil.rmtree(sessions_dir, ignore_errors=True)  # whatever a previous run left behind
         self.sessions = hls_sessions.SessionManager(sessions_dir)
@@ -445,6 +459,19 @@ class RapidBayDaemon:
             **extra,
         }
 
+    def _start_threshold(self, magnet_hash: str, filename: str, filepath: str, file_size: int, available: int) -> int:
+        """Bytes needed before playback can start, for this file: HLS_START_SECONDS of its own video."""
+        key = (magnet_hash, filename)
+        duration = self._durations.get(key)
+        if duration is None and available >= min(_HEADER_BYTES, max(file_size // 4, 1024 * 1024)):
+            now = time.monotonic()
+            if now - self._duration_tries.get(key, -10.0) >= 5.0:
+                self._duration_tries[key] = now
+                duration = hls_sessions.probe_duration(filepath)
+                if duration is not None:
+                    self._durations[key] = duration
+        return _start_threshold_bytes(file_size, duration, settings.HLS_START_SECONDS)
+
     def _hls_can_stream(self, magnet_hash: str, filename: str) -> bool:
         """Whether a file that is still downloading can start playing: enough of it has arrived,
         and its container can be read in order (an MP4 only when its index comes first)."""
@@ -455,9 +482,9 @@ class RapidBayDaemon:
         if i is None or f is None:
             return False
         available = self._get_available_bytes(magnet_hash, filename)
-        if available < _hls_effective_threshold(f.size):
-            return False
         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
+        if available < self._start_threshold(magnet_hash, filename, filepath, f.size, available):
+            return False
         return video_conversion.is_pipe_streamable(filepath, available)
 
     def create_session(self, magnet_hash: str, filename: str, start_seconds: float = 0.0) -> Dict[str, Any]:
@@ -500,7 +527,7 @@ class RapidBayDaemon:
         if not _is_safe_subpath(settings.DOWNLOAD_DIR, filepath):
             return "invalid_path"
         available = self._get_available_bytes(magnet_hash, filename)
-        if available < _hls_effective_threshold(f.size):
+        if available < self._start_threshold(magnet_hash, filename, filepath, f.size, available):
             return "not_ready"
         if not video_conversion.is_pipe_streamable(filepath, available):
             return "unsupported_format"
@@ -565,7 +592,7 @@ class RapidBayDaemon:
             return
         self._head_rushes[key] = now
         self.torrent_client.prioritize_byte_range(
-            magnet_hash, filename, 0, _hls_effective_threshold(f.size)
+            magnet_hash, filename, 0, _start_threshold_bytes(f.size, self._durations.get(key), settings.HLS_START_SECONDS)
         )
 
     def _download_external_subtitles(self, filepath: str, output_dir: str, skip: List[str] | None = None) -> None:

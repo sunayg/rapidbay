@@ -72,7 +72,7 @@ HLS_LADDER_HEIGHTS: List[int] = [1080, 720, 480, 360]  # quality levels to encod
 HLS_ENCODER: str = "auto"  # auto, software or vaapi
 HLS_X264_PRESET: str = "veryfast"  # software encoder speed/quality trade-off
 HLS_SEGMENT_DURATION: int = 6  # seconds per HLS segment
-HLS_START_THRESHOLD: int = 50 * 1024 * 1024  # bytes of sequential data before starting HLS
+HLS_START_SECONDS: int = 20  # seconds of video that must have downloaded, from the start, before playback begins
 MAX_PARALLEL_HLS_STREAMS: int = 2  # cap on concurrent encode sessions
 HLS_PREFETCH_BYTES: int = 32 * 1024 * 1024  # rolling deadline-rushed window the streamer keeps ahead of the pipe feeder
 

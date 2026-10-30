@@ -70,7 +70,7 @@ FIELDS: dict[str, Field] = dict(
         _f("MAX_OUTPUT_FILE_AGE", "torrents", "int", "Max output file age (hours)", min=1),
         _f("HLS_LADDER_HEIGHTS", "streaming", "int_list", "Quality levels (heights)", help="One height per line, highest first, for example 1080. The player switches between them as the connection allows. Never above the source.", min=144, max=4320, non_empty=True),
         _f("HLS_SEGMENT_DURATION", "streaming", "int", "Segment duration (seconds)", min=1),
-        _f("HLS_START_THRESHOLD", "streaming", "int", "Start threshold (bytes)", min=1),
+        _f("HLS_START_SECONDS", "streaming", "int", "Start buffer (seconds of video)", help="Playback of a file that is still downloading begins once this much of the video has arrived. It is worked out from the file's own length and size.", min=1, max=600),
         _f("MAX_PARALLEL_HLS_STREAMS", "streaming", "int", "Max parallel HLS streams", min=1),
         _f("HLS_PREFETCH_BYTES", "streaming", "int", "Prefetch window (bytes)", min=1),
         _f("AAC_BITRATE", "conversion", "bitrate", "AAC bitrate", help="For example 256k."),
