@@ -32,6 +32,66 @@ export interface HlsOptions {
   onLevelSwitch?: (index: number) => void;
 }
 
+export interface ResumeWait {
+  // Seconds of the stream encoded so far, and the place the viewer wants to resume at.
+  encoded: number;
+  target: number;
+}
+
+// Segments of lead the encoder needs past the resume point before playback can start there.
+const RESUME_LEAD_SECONDS = 12;
+const RESUME_POLL_MS = 2000;
+
+// The encoder starts at the beginning of the file, so a late resume point may not exist yet:
+// hls.js would silently start from 0 instead. Poll the top rendition's playlist until the
+// encoded part reaches the point (or the stream ends), reporting progress on the way.
+// Resolves true when playback can start at `position`, false when cancelled. Anything it
+// cannot read (a single-rendition stream, a network error) resolves true: hls.js then copes.
+export async function waitForResumePoint(
+  masterUrl: string,
+  position: number,
+  onWaiting: (wait: ResumeWait | null) => void,
+  cancelled: () => boolean,
+  fetchText: (url: string) => Promise<string> = async (url) => (await fetch(url)).text(),
+): Promise<boolean> {
+  if (position <= 0) return true;
+  let variantUrl: string | null = null;
+  try {
+    const lines = (await fetchText(masterUrl)).split("\n").map((line) => line.trim());
+    const at = lines.findIndex((line) => line.startsWith("#EXT-X-STREAM-INF"));
+    const uri = at >= 0 ? lines.slice(at + 1).find((line) => line && !line.startsWith("#")) : undefined;
+    if (uri) variantUrl = new URL(uri, new URL(masterUrl, window.location.href)).toString();
+  } catch {
+    return true;
+  }
+  if (!variantUrl) return true;
+  let failures = 0;
+  while (!cancelled()) {
+    try {
+      const text = await fetchText(variantUrl);
+      failures = 0;
+      let encoded = 0;
+      for (const match of text.matchAll(/#EXTINF:([\d.]+)/g)) encoded += parseFloat(match[1]);
+      if (text.includes("#EXT-X-ENDLIST") || encoded >= position + RESUME_LEAD_SECONDS) {
+        onWaiting(null);
+        return true;
+      }
+      onWaiting({ encoded, target: position });
+    } catch {
+      if (++failures >= 3) {
+        onWaiting(null);
+        return true;
+      }
+    }
+    // Short sleeps, so a cancel (start from the beginning) is noticed at once.
+    for (let waited = 0; waited < RESUME_POLL_MS && !cancelled(); waited += 200) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+  onWaiting(null);
+  return false;
+}
+
 export function playSafely(video: HTMLVideoElement): void {
   try {
     const promise = video.play() as Promise<void> | undefined;

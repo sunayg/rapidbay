@@ -19,7 +19,7 @@ import CastButton from "./CastButton.vue";
 import EpisodeMenu from "./EpisodeMenu.vue";
 import TracksMenu from "./TracksMenu.vue";
 import { cleanMediaTitle, formatClock, languageName, type EpisodeChoice } from "./media";
-import { attachHls, playSafely, type HlsHandle, type QualityLevel } from "./useHls";
+import { attachHls, playSafely, waitForResumePoint, type HlsHandle, type QualityLevel, type ResumeWait } from "./useHls";
 import { useEpisodes } from "./useEpisodes";
 import { usePlayerKeys } from "./usePlayerKeys";
 import { useTextTracks } from "./useTextTracks";
@@ -254,9 +254,23 @@ let notedWatch = false;
 let streamLive = false;
 let positionTimer: ReturnType<typeof setInterval> | undefined;
 let hls: HlsHandle | null = null;
+const resumeWait = ref<ResumeWait | null>(null);
+let skipResume = false;
 const qualityLevels = ref<QualityLevel[]>([]);
 const selectedQuality = ref(-1);
 const playingQuality = ref(-1);
+
+function startFromBeginning(): void {
+  skipResume = true;
+}
+
+const clock = (seconds: number) => {
+  const total = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = String(total % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+};
 
 function selectQuality(index: number): void {
   selectedQuality.value = index;
@@ -317,9 +331,15 @@ async function startSource(): Promise<void> {
   const saved = getVideoPosition(props.magnet, props.filename);
   streamLive = isHlsUrl(props.url);
   if (streamLive) {
+    let start = saved;
+    if (saved > 0) {
+      const ready = await waitForResumePoint(url, saved, (wait) => (resumeWait.value = wait), () => disposed || skipResume);
+      if (disposed) return;
+      if (!ready) start = 0; // the viewer chose to start from the beginning
+    }
     try {
       hls = await attachHls(el, url, {
-        startPosition: saved,
+        startPosition: start,
         onFatal: () => {
           hls = null;
           if (!disposed) emit("stream-error");
@@ -473,7 +493,11 @@ onBeforeUnmount(() => {
         :src="subtitle.url"
       />
     </video>
-    <div v-else class="player-unsupported" role="status">
+    <div v-if="resumeWait" class="player-resume-wait" role="status">
+      <p>Preparing the video up to where you left off ({{ clock(resumeWait.encoded) }} of {{ clock(resumeWait.target) }})</p>
+      <button type="button" class="primary" @click="startFromBeginning">Start from the beginning</button>
+    </div>
+    <div v-else-if="!(supported && url)" class="player-unsupported" role="status">
       <p>This file's format can't be played in the browser.</p>
       <a :href="fileLink" download>Download the file</a>
     </div>
@@ -591,6 +615,19 @@ onBeforeUnmount(() => {
 .player-video::cue { background: rgba(0, 0, 0, 0.6); font: 600 1.15em/1.3 system-ui, sans-serif; }
 .player-unsupported { display: grid; gap: var(--space-3); text-align: center; padding: var(--space-5); color: var(--text-dim); }
 .player-unsupported a { color: var(--link); }
+.player-resume-wait {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  text-align: center;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.72);
+}
 
 .player-top {
   position: absolute;
