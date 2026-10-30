@@ -78,6 +78,14 @@ export interface CastRequest {
   cc: ChromecastLike | null;
 }
 
+// "Not available" says nothing about why, so add what the page can see of the cast SDK.
+function explain(problem: string): string {
+  if (!/not available/i.test(problem)) return problem;
+  const cast = (window as unknown as { chrome?: { cast?: { isAvailable?: boolean } } }).chrome?.cast;
+  const sdk = !cast ? "cast script not loaded" : cast.isAvailable ? "cast script ready" : "cast script loaded but not ready";
+  return `${problem} (${window.isSecureContext ? "https" : "not https"}, ${sdk})`;
+}
+
 // Resolves to an error message to show, or null when the cast started.
 export async function castVideo(request: CastRequest): Promise<string | null> {
   const { cc, video } = request;
@@ -117,7 +125,7 @@ export async function castVideo(request: CastRequest): Promise<string | null> {
         description: null,
       },
       (problem) => {
-        if (problem) return resolve(String(problem));
+        if (problem) return resolve(explain(String(problem)));
         // The TV plays from here, so stop the local copy.
         if (!video.paused) video.pause();
         resolve(null);
