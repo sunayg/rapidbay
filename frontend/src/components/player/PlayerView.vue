@@ -62,7 +62,17 @@ const statusLabel = computed(() => {
   const text = (props.downloadStatus || "").replace(/_/g, " ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 });
+const elapsedLabel = computed(() => formatClock(currentTime.value));
+const totalLabel = computed(() => (duration.value ? formatClock(duration.value) : "0:00"));
 const remainingLabel = computed(() => (duration.value ? formatClock(Math.max(0, duration.value - currentTime.value)) : "0:00"));
+// How far the browser has loaded ahead of the playhead, as a share of the whole length.
+const bufferedEnd = ref(0);
+const bufferedPercent = computed(() => (duration.value ? Math.min(100, (bufferedEnd.value / duration.value) * 100) : 0) + "%");
+// While the file downloads, the part that has arrived is all that can be played: a marker shows where it ends.
+// It is bytes over bytes, so it matches the timeline only roughly, more so for a variable-bitrate file.
+const downloadLimit = computed(() =>
+  props.downloadProgress !== null && props.downloadProgress < 1 ? Math.max(0, Math.min(1, props.downloadProgress)) * 100 : null,
+);
 const scrubValue = computed(() => (duration.value ? Math.round((currentTime.value / duration.value) * 1000) : 0));
 const progressPercent = computed(() => scrubValue.value / 10 + "%");
 
@@ -99,9 +109,22 @@ function reveal(): void {
 
 // ---- playback ---------------------------------------------------------------------
 
+function syncBuffered(): void {
+  const el = video.value;
+  if (!el || !el.buffered) return;
+  const at = el.currentTime || 0;
+  let end = 0;
+  for (let i = 0; i < el.buffered.length; i++) {
+    // The range holding the playhead is the one that counts; a gap after a seek starts a new range.
+    if (el.buffered.start(i) <= at + 0.5 && el.buffered.end(i) >= at) end = el.buffered.end(i);
+  }
+  bufferedEnd.value = end;
+}
+
 function syncPlayback(): void {
   const el = video.value;
   if (!el) return;
+  syncBuffered();
   paused.value = el.paused;
   currentTime.value = el.currentTime || 0;
   duration.value = isFinite(el.duration) ? el.duration : 0;
@@ -477,6 +500,7 @@ onBeforeUnmount(() => {
       @ended="onEnded"
       @loadedmetadata="onLoadedMetadata"
       @durationchange="syncPlayback"
+      @progress="syncBuffered"
       @volumechange="syncPlayback"
     >
       <track
@@ -510,17 +534,30 @@ onBeforeUnmount(() => {
 
     <div v-if="supported" v-show="controlsOn" class="player-controls" @click.stop>
       <div class="player-progress">
-        <input
-          class="player-scrub"
-          type="range"
-          min="0"
-          max="1000"
-          :value="scrubValue"
-          :style="{ '--progress': progressPercent }"
-          aria-label="Seek"
-          @input="onScrub"
-        />
-        <span class="player-remaining" aria-label="Time remaining">{{ remainingLabel }}</span>
+        <span class="player-elapsed" aria-label="Elapsed time">{{ elapsedLabel }}</span>
+        <div class="player-scrub-wrap">
+          <div class="player-track" aria-hidden="true">
+            <div v-if="downloadLimit !== null" class="player-downloaded" :style="{ width: downloadLimit + '%' }"></div>
+            <div class="player-buffered" :style="{ width: bufferedPercent }"></div>
+            <div
+              v-if="downloadLimit !== null"
+              class="player-limit"
+              :style="{ left: downloadLimit + '%' }"
+              :title="'Downloaded so far: ' + Math.round(downloadLimit) + '%'"
+            ></div>
+          </div>
+          <input
+            class="player-scrub"
+            type="range"
+            min="0"
+            max="1000"
+            :value="scrubValue"
+            :style="{ '--progress': progressPercent }"
+            aria-label="Seek"
+            @input="onScrub"
+          />
+        </div>
+        <span class="player-total" :title="'Time remaining ' + remainingLabel" aria-label="Total length">{{ totalLabel }}</span>
       </div>
       <div class="player-row">
         <button type="button" class="player-btn" :aria-label="paused ? 'Play' : 'Pause'" @click="togglePlay">
@@ -658,15 +695,23 @@ onBeforeUnmount(() => {
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.82));
 }
 .player-progress { display: flex; align-items: center; gap: var(--space-3); }
-.player-remaining { min-width: 3.5em; text-align: right; font-size: 0.85rem; font-variant-numeric: tabular-nums; color: var(--text-dim); }
+.player-elapsed, .player-total { min-width: 3.5em; font-size: 0.85rem; font-variant-numeric: tabular-nums; color: var(--text-dim); }
+.player-elapsed { text-align: left; }
+.player-total { text-align: right; }
 .player-scrub, .player-volume-slider { -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; margin: 0; }
-.player-scrub { flex: 1; min-width: 0; height: 28px; }
+.player-scrub-wrap { position: relative; flex: 1; min-width: 0; height: 28px; }
+/* The bar is the whole length: a base track, what the browser has loaded, and (while downloading) where the download ends. */
+.player-track { position: absolute; left: 0; right: 0; top: 50%; height: 5px; margin-top: -2.5px; border-radius: 3px; background: rgba(255, 255, 255, 0.22); overflow: visible; pointer-events: none; }
+.player-downloaded { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: rgba(255, 255, 255, 0.34); }
+.player-buffered { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: rgba(255, 255, 255, 0.42); }
+.player-limit { position: absolute; top: -4px; bottom: -4px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: var(--warn, #f5b942); }
+.player-scrub { position: absolute; inset: 0; width: 100%; height: 100%; }
 .player-scrub::-webkit-slider-runnable-track {
   height: 5px;
   border-radius: 3px;
-  background: linear-gradient(to right, var(--accent) var(--progress, 0%), rgba(255, 255, 255, 0.28) var(--progress, 0%));
+  background: linear-gradient(to right, var(--accent) var(--progress, 0%), transparent var(--progress, 0%));
 }
-.player-scrub::-moz-range-track { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.28); }
+.player-scrub::-moz-range-track { height: 5px; border-radius: 3px; background: transparent; }
 .player-scrub::-moz-range-progress { height: 5px; border-radius: 3px; background: var(--accent); }
 .player-scrub::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -4.5px; border-radius: 50%; background: #fff; border: 0; }
 .player-scrub::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 0; }
@@ -773,6 +818,6 @@ onBeforeUnmount(() => {
   .player-row { gap: 0; }
   .player-btn { min-width: 36px; height: 42px; padding: 0 2px; }
   .player-pop:last-of-type .player-menu, .player-pop .player-menu { right: -8px; }
-  .player-scrub { height: 36px; }
+  .player-scrub-wrap { height: 36px; }
 }
 </style>

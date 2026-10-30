@@ -365,6 +365,22 @@ describe("download screen", () => {
     expect(host.props("downloadProgress")).toBe(0.25);
   });
 
+  it("shows on the progress bar where playback will begin", async () => {
+    const { wrapper } = await download();
+    const source = FakeEventSource.last("/api/magnet_events/");
+    source.emit(info({ progress: 0.1, start_at: 0.3 }));
+    await flushPromises();
+    expect(wrapper.find(".spinner-marker").attributes("style")).toContain("left: 30%");
+    expect(wrapper.find(".spinner-marker-label").text()).toBe("Playback starts here");
+    expect(wrapper.find(".spinner-marker").classes()).not.toContain("reached");
+    source.emit(info({ progress: 0.4, start_at: 0.3 }));
+    await flushPromises();
+    expect(wrapper.find(".spinner-marker").classes()).toContain("reached");
+    source.emit(info({ progress: 0.4 })); // the server has nothing to say about it (not a video)
+    await flushPromises();
+    expect(wrapper.find(".spinner-marker").exists()).toBe(false);
+  });
+
   it("keeps the same session and player when the download finishes", async () => {
     handlers[SESSION] = () => ({ url: "/api/hls/abc123/master.m3u8" });
     const { wrapper } = await download();

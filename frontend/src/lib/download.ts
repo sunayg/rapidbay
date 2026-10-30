@@ -12,6 +12,8 @@ export interface FileInfo {
   supported?: boolean;
   subtitles?: string[];
   can_stream?: boolean;
+  // How far into the file (0 to 1) it has to have downloaded before it can start playing.
+  start_at?: number;
   // "direct": the browser plays the file as it is. "session": it is encoded on demand.
   playback?: "direct" | "session";
   done?: boolean;

@@ -394,8 +394,11 @@ class RapidBayDaemon:
         # container the encoder can read from a pipe (an MP4 only when faststart).
         extra: Dict[str, Any] = {}
         if is_video and viewer:
-            if self._hls_can_stream(magnet_hash, filename):
-                extra = {'can_stream': True}
+            can_stream, start_at = self._stream_readiness(magnet_hash, filename)
+            if start_at is not None:
+                extra['start_at'] = start_at  # where playback can begin, as a share of the file
+            if can_stream:
+                extra['can_stream'] = True
             else:
                 # A viewer is looking at this file (only their status polls reach this
                 # branch) but the playable prefix hasn't formed yet: deadline-rush the
@@ -472,20 +475,23 @@ class RapidBayDaemon:
                     self._durations[key] = duration
         return _start_threshold_bytes(file_size, duration, settings.HLS_START_SECONDS)
 
-    def _hls_can_stream(self, magnet_hash: str, filename: str) -> bool:
-        """Whether a file that is still downloading can start playing: enough of it has arrived,
-        and its container can be read in order (an MP4 only when its index comes first)."""
+    def _stream_readiness(self, magnet_hash: str, filename: str) -> tuple[bool, float | None]:
+        """For a file that is still downloading: whether playback can start now, and how far into the
+        file (0 to 1) it has to have downloaded before it can. The container must be readable in order
+        (an MP4 only when its index comes first)."""
         h = self.torrent_client.torrents.get(magnet_hash)
         if not h or not h.has_metadata():
-            return False
+            return False, None
         i, f = torrent.get_index_and_file_from_files(h, filename)
-        if i is None or f is None:
-            return False
+        if i is None or f is None or f.size <= 0:
+            return False, None
         available = self._get_available_bytes(magnet_hash, filename)
         filepath = os.path.join(settings.DOWNLOAD_DIR, magnet_hash, f.path)
-        if available < self._start_threshold(magnet_hash, filename, filepath, f.size, available):
-            return False
-        return video_conversion.is_pipe_streamable(filepath, available)
+        needed = self._start_threshold(magnet_hash, filename, filepath, f.size, available)
+        fraction = round(needed / f.size, 4)
+        if available < needed:
+            return False, fraction
+        return video_conversion.is_pipe_streamable(filepath, available), fraction
 
     def create_session(self, magnet_hash: str, filename: str, start_seconds: float = 0.0) -> Dict[str, Any]:
         """Open (or join) the seekable encode session for a file.

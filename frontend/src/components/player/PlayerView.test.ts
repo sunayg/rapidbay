@@ -366,7 +366,7 @@ describe("keyboard, remote and media keys", () => {
     expect(state.muted).toBe(true);
   });
 
-  it("the seek bar jumps to the matching time and shows time remaining", async () => {
+  it("the seek bar jumps to the matching time and shows elapsed and total length", async () => {
     const { video, state } = await mountPlayer();
     state.duration = 600;
     video.dispatchEvent(new Event("durationchange"));
@@ -375,7 +375,52 @@ describe("keyboard, remote and media keys", () => {
     await scrub.trigger("input");
     expect(state.currentTime).toBe(300);
     await flushPromises();
-    expect(wrapper!.find(".player-remaining").text()).toBe("5:00");
+    expect(wrapper!.find(".player-elapsed").text()).toBe("5:00");
+    expect(wrapper!.find(".player-total").text()).toBe("10:00");
+    expect(wrapper!.find(".player-total").attributes("title")).toBe("Time remaining 5:00");
+  });
+});
+
+describe("seek bar feedback", () => {
+  function fakeBuffered(video: HTMLVideoElement, ranges: [number, number][]) {
+    Object.defineProperty(video, "buffered", {
+      configurable: true,
+      value: { length: ranges.length, start: (i: number) => ranges[i][0], end: (i: number) => ranges[i][1] },
+    });
+  }
+
+  it("shows how much the browser has loaded, as a share of the whole length", async () => {
+    const { video, state } = await mountPlayer();
+    state.duration = 600;
+    state.currentTime = 100;
+    fakeBuffered(video, [[0, 150]]);
+    video.dispatchEvent(new Event("durationchange"));
+    video.dispatchEvent(new Event("progress"));
+    await flushPromises();
+    expect(wrapper!.find(".player-buffered").attributes("style")).toContain("width: 25%");
+  });
+
+  it("only counts the loaded range that holds the playhead", async () => {
+    const { video, state } = await mountPlayer();
+    state.duration = 1000;
+    state.currentTime = 500;
+    fakeBuffered(video, [[0, 100], [490, 600]]); // an earlier part, and the part being played
+    video.dispatchEvent(new Event("durationchange"));
+    video.dispatchEvent(new Event("progress"));
+    await flushPromises();
+    expect(wrapper!.find(".player-buffered").attributes("style")).toContain("width: 60%");
+  });
+
+  it("marks how far the download has got while the file is still downloading", async () => {
+    const { video, state } = await mountPlayer({ downloadProgress: 0.42, downloadStatus: "downloading" });
+    state.duration = 600;
+    video.dispatchEvent(new Event("durationchange"));
+    await flushPromises();
+    expect(wrapper!.find(".player-limit").attributes("style")).toContain("left: 42%");
+    expect(wrapper!.find(".player-downloaded").attributes("style")).toContain("width: 42%");
+    await wrapper!.setProps({ downloadProgress: null });
+    expect(wrapper!.find(".player-limit").exists()).toBe(false);
+    expect(wrapper!.find(".player-downloaded").exists()).toBe(false);
   });
 });
 

@@ -40,6 +40,7 @@ const playLink = ref<string | null>(null);
 const subtitles = ref<SubtitleTrack[]>([]);
 const supported = ref<boolean | null>(null);
 const downloadProgress = ref<number | null>(null);
+const startAt = ref<number | null>(null); // percent of the file where playback can begin
 const hlsFailed = ref(false);
 const streamMessage = ref<string | null>(null);
 const cancelling = ref(false);
@@ -80,6 +81,7 @@ function applyFileInfo(data: FileInfo): void {
     void openSession(data.status === "ready");
   }
   downloadProgress.value = data.status !== "ready" ? data.progress || null : null;
+  startAt.value = typeof data.start_at === "number" ? data.start_at * 100 : null;
 
   // <track> subtitles are for a directly played MP4; an encode session declares them in its playlist.
   const playingSession = isHlsLink(playLink.value);
@@ -200,6 +202,7 @@ watch([magnet, filename], () => {
   polling = false;
   status.value = null;
   progress.value = null;
+  startAt.value = null;
   playLink.value = null;
   subtitles.value = [];
   hlsFailed.value = false;
@@ -246,6 +249,8 @@ watch([magnet, filename], () => {
           :heading="heading || 'Starting'"
           :subheading="subheading ?? ''"
           :progress="progress"
+          :marker="status === 'downloading' ? startAt : null"
+          marker-label="Playback starts here"
         />
         <p v-if="streamMessage" class="stream-message" role="status">{{ streamMessage }}</p>
         <button v-if="canCancel" type="button" class="dl-button cancel-download" :disabled="cancelling" @click="cancelDownload">

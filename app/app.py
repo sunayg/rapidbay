@@ -231,6 +231,7 @@ class FileStatusResponse(BaseModel):
     hls_subtitles: List[str] | None = None
     hls_pending: bool | None = None
     can_stream: bool | None = None
+    start_at: float | None = None
     playback: str | None = None
 
 
