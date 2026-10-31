@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import threading
 import time
@@ -21,6 +22,7 @@ from dataclasses import dataclass, field
 from subprocess import DEVNULL, PIPE, Popen
 from typing import Callable, Dict, List
 
+import fmp4
 import hls_ladder
 import log
 import settings
@@ -101,6 +103,8 @@ class Session:
     failures: int = 0
     dead: bool = False
     closed: bool = False
+    # Track id -> timescale for each variant, read from its init file.
+    timescales: Dict[int, Dict[int, int]] = field(default_factory=dict)
 
     @property
     def separate_audio(self) -> bool:
@@ -172,6 +176,19 @@ def _adopt_later_init(directory: str, level: int, path: str) -> bool:
                 os.replace(path + ".tmp", path)
                 return True
     return False
+
+
+def _read_timescales(directory: str, level: int) -> Dict[int, int]:
+    """A variant's track timescales, from any run's init file: every run writes the same one."""
+    pattern = re.compile(rf"^(r?init\d*)_v{level}\.mp4$")
+    with contextlib.suppress(OSError):
+        for name in sorted(os.listdir(directory)):
+            if pattern.match(name):
+                with contextlib.suppress(OSError, struct.error, IndexError), open(os.path.join(directory, name), "rb") as f:
+                    timescales = fmp4.track_timescales(f.read())
+                    if timescales:
+                        return timescales
+    return {}
 
 
 def encoded_through(indexes: List[int], start: int) -> int:
@@ -457,9 +474,23 @@ class SessionManager:
             session.requested = index
             session.latest = index
         try:
-            return self._wait_for(session, kind, level, index, path, cancelled)
+            found = self._wait_for(session, kind, level, index, path, cancelled)
         except SessionError:
             return None  # the session was closed under this request
+        if found and kind == "seg":
+            self._place(session, level, index, found)
+        return found
+
+    def _place(self, session: Session, level: int, index: int, path: str) -> None:
+        """Put a segment's fragment times where the segment sits in the file (see fmp4). Done on every
+        send: a segment deleted and encoded again has the same name, and one already in place is not moved."""
+        with session.lock:
+            timescales = session.timescales.get(level) or _read_timescales(session.directory, level)
+            if not timescales:
+                return
+            session.timescales[level] = timescales
+            with contextlib.suppress(OSError, struct.error, IndexError):
+                fmp4.place_segment(path, timescales, index, session.segment_seconds)
 
     def _wait_for(
         self, session: Session, kind: str, level: int, index: int, path: str, cancelled: Callable[[], bool]

@@ -107,13 +107,14 @@ def test_session_args_restart_at_a_segment_on_the_same_timeline():
     ladder = plan_ladder(1920, 1080, HEIGHTS)
     args = build_session_args_for_test(ladder, start=7)
     assert args[args.index("-ss") + 1] == "42"
-    assert args[args.index("-output_ts_offset") + 1] == "42"
+    assert "-output_ts_offset" not in args  # the muxer ignores it; the session places the segments
+    assert args[args.index("-hls_segment_options") + 1] == "use_editlist=0"  # so every run's init is the same
     assert args[args.index("-start_number") + 1] == "7"
     assert args.index("-ss") < args.index("-i")  # input seeking, so it is fast
     assert "temp_file" in args[args.index("-hls_flags") + 1]  # a segment is never visible half-written
     assert args[args.index("-i") + 1] == "/in.mkv"
     fresh = build_session_args_for_test(ladder, start=0)
-    assert "-ss" not in fresh and "-output_ts_offset" not in fresh
+    assert "-ss" not in fresh
 
 
 def build_session_args_for_test(ladder, start):

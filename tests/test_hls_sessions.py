@@ -4,6 +4,8 @@ import hls_ladder
 import hls_sessions as hs
 import pytest
 
+from tests.test_fmp4 import init_segment, media_segment, tfdts
+
 
 def _session(duration=20.0, directory="/tmp/x"):
     ladder = hls_ladder.plan_ladder(1280, 720, [720, 480])
@@ -333,6 +335,25 @@ def test_segments_are_sent_as_soon_as_they_exist(tmp_path, monkeypatch):
     monkeypatch.setattr(manager, "_ensure_encoding", lambda s, i: None)
     (tmp_path / hs.segment_name(0, 0)).write_bytes(b"x")
     assert manager.file_for(session, hs.segment_name(0, 0)) == str(tmp_path / hs.segment_name(0, 0))
+
+
+def test_a_segment_is_sent_at_its_place_in_the_file_whichever_run_wrote_it(tmp_path, monkeypatch):
+    manager = hs.SessionManager(str(tmp_path))
+    session = _session(directory=str(tmp_path))
+    session.runs = 2
+    monkeypatch.setattr(manager, "_ensure_encoding", lambda s, i: None)
+    (tmp_path / "init_v0.mp4").write_bytes(b"")  # run 1 was cut short; run 2 started at segment 2
+    (tmp_path / "rinit2_v0.mp4").write_bytes(init_segment([(1, 12288), (2, 48000)]))
+    name = hs.segment_name(0, 2)
+    (tmp_path / name).write_bytes(media_segment([[(1, 0), (2, 0)]]))
+    assert manager.file_for(session, name) == str(tmp_path / name)
+    assert tfdts((tmp_path / name).read_bytes()) == [2 * 6 * 12288, 2 * 6 * 48000]
+    assert manager.file_for(session, name) == str(tmp_path / name)  # sent again: not moved twice
+    assert tfdts((tmp_path / name).read_bytes()) == [2 * 6 * 12288, 2 * 6 * 48000]
+    # Deleted behind the viewer and encoded again after a seek back: same name, times from 0 again.
+    (tmp_path / name).write_bytes(media_segment([[(1, 0), (2, 0)]]))
+    assert manager.file_for(session, name) == str(tmp_path / name)
+    assert tfdts((tmp_path / name).read_bytes()) == [2 * 6 * 12288, 2 * 6 * 48000]
 
 
 def test_a_download_is_complete_once_its_link_exists_even_if_the_torrent_is_gone(tmp_path):

@@ -408,12 +408,12 @@ def build_session_args(
 ) -> List[str]:
     """ffmpeg arguments for a seekable session: read `source` by path from `start_segment`.
 
-    Output goes to the working directory as `seg_v{N}_{index:04d}.m4s` with the index and the
-    timestamps continuing from the start point, so a restarted encode lands on the same timeline
-    as the one it replaced. With more than one audio track, each track is written as an audio-only
+    Output goes to the working directory as `seg_v{N}_{index:04d}.m4s` with the index continuing
+    from the start point; the fragment times start at 0 in every run, and the session moves each
+    segment to its place before sending it (see fmp4). With more than one audio track, each track is written as an audio-only
     variant after the video ones (so variant `len(ladder) + k` is track k) and the video variants
     carry no audio; with one, the audio is muxed into every video variant. `init_prefix` names the init files (`{init_prefix}_v{N}.mp4`); a
-    restart gives them a new name because their edit lists differ, and the first one is kept.
+    restart writes its own beside the first run's, which the playlists keep pointing at.
     """
     start = start_segment * segment_seconds
     args: List[str] = ["ffmpeg", "-nostdin", "-v", "error"]
@@ -443,9 +443,6 @@ def build_session_args(
             mix = downmix_filter(track, audio_channels, downmix, downmix_boost) if track is not None else None
             if mix:
                 args += [f"-filter:a:{k}", mix]
-    if start > 0:
-        # Timestamps restart at 0 after -ss; shift them back so segment N sits at N * seconds.
-        args += ["-output_ts_offset", str(start)]
     if separate:
         parts = [f"v:{r.index}" for r in ladder] + [f"a:{k}" for k in range(len(audio_tracks))]
     else:
@@ -458,6 +455,9 @@ def build_session_args(
         "-hls_list_size", "0",
         "-start_number", str(start_segment),
         "-hls_flags", "temp_file",
+        # Without edit lists every run writes the same init file; the session puts each segment's fragment
+        # times in place instead (the muxer starts them at 0 in every run, whatever -output_ts_offset says).
+        "-hls_segment_options", "use_editlist=0",
         "-hls_fmp4_init_filename", f"{init_prefix}_v{_variant_token(len(parts))}.mp4",
         "-hls_segment_filename", "seg_v%v_%04d.m4s",
         "-var_stream_map", stream_map,
